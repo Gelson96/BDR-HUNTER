@@ -22,7 +22,7 @@ st.markdown(
 )
 
 st.title("BDR Hunter")
-st.subheader("Inteligência de Mercado & Setores Estratégicos")
+st.subheader("Inteligência de Mercado, Setores & Risco")
 st.divider()
 
 # --- FUNÇÕES ---
@@ -42,6 +42,17 @@ def processar_inteligencia_premium(d):
         elif cap > 1000000: return "MÉDIO", "10M-50M*", "100-250*"
         else: return "MÉDIO", "4,8M+*", "50+*"
 
+def verificar_situacao_especial(d):
+    # Verifica no nome e na situação especial da Receita
+    razao = d.get('razao_social', '').upper()
+    sit_especial = d.get('situacao_especial', '').upper()
+    
+    if "RECUPERACAO JUDICIAL" in razao or "RECUPERACAO JUDICIAL" in sit_especial:
+        return "⚠️ RECUPERAÇÃO JUDICIAL"
+    if d.get('descricao_situacao_cadastral') != "ATIVA":
+        return f"🚫 {d.get('descricao_situacao_cadastral')}"
+    return "✅ REGULAR"
+
 def processar_lista(lista_cnpjs):
     dados_finais = []
     progresso = st.progress(0)
@@ -53,21 +64,21 @@ def processar_lista(lista_cnpjs):
                 d = res.json()
                 porte, fat, func = processar_inteligencia_premium(d)
                 fantasia = d.get('nome_fantasia') or d.get('razao_social')
-                nome_limpo = limpar_nome_empresa(fantasia)
-                cnae_desc = d.get('cnae_fiscal_descricao', 'Não Informado')
+                status = verificar_situacao_especial(d)
                 
                 dados_finais.append({
                     "Empresa": fantasia,
-                    "Atividade Principal (CNAE)": cnae_desc,
+                    "Status": status,
+                    "Atividade Principal": d.get('cnae_fiscal_descricao', 'N/I'),
                     "Porte": porte,
                     "Faturamento Est.*": fat,
                     "Funcionários Est.*": func,
                     "Capital Social": f"R$ {float(d.get('capital_social',0)):,.2f}",
-                    "Cidade/UF": f"{d.get('municipio', '')}/{d.get('uf', '')}",
-                    "LinkedIn": f"https://www.linkedin.com/search/results/people/?keywords={nome_limpo.replace(' ', '%20')}%20(Comprador%20OR%20Suprimentos%20OR%20Compras)",
-                    "WhatsApp": f"https://www.google.com.br/search?q=whatsapp+telefone+setor+compras+{(nome_limpo + ' ' + d.get('municipio', '')).replace(' ', '+')}",
-                    "Endereço": f"{d.get('logradouro', '')}, {d.get('numero', '')} - {d.get('municipio', '')}/{d.get('uf', '')}",
-                    "Nome Busca": nome_limpo
+                    "Cidade/UF": f"{d.get('municipio')}/{d.get('uf')}",
+                    "LinkedIn": f"https://www.linkedin.com/search/results/people/?keywords={limpar_nome_empresa(fantasia).replace(' ', '%20')}%20(Comprador%20OR%20Suprimentos)",
+                    "WhatsApp": f"https://www.google.com.br/search?q=whatsapp+telefone+setor+compras+{fantasia.replace(' ', '+')}",
+                    "Endereço": f"{d.get('logradouro')}, {d.get('numero')} - {d.get('municipio')}",
+                    "Nome Busca": limpar_nome_empresa(fantasia)
                 })
         except: continue
         progresso.progress((i + 1) / len(lista_cnpjs))
@@ -76,39 +87,26 @@ def processar_lista(lista_cnpjs):
 # --- INTERFACE ---
 col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
 with col_in2:
-    entrada = st.text_area("Insira os CNPJs:", height=150)
-    iniciar = st.button("🚀 Iniciar Análise Estratégica", use_container_width=True)
-
-if iniciar:
-    if entrada:
-        cnpjs = re.findall(r'\d+', entrada)
-        if cnpjs:
-            st.session_state.df_resultado = processar_lista(cnpjs)
-        else: st.error("Nenhum CNPJ encontrado.")
+    entrada = st.text_area("Insira os CNPJs para análise de risco e porte:", height=150)
+    if st.button("🚀 Iniciar Varredura Premium", use_container_width=True):
+        if entrada:
+            cnpjs = re.findall(r'\d+', entrada)
+            if cnpjs: st.session_state.df_resultado = processar_lista(cnpjs)
 
 if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
     df = st.session_state.df_resultado
-    st.success(f"Pronto! {len(df)} empresas mapeadas.")
-    
-    # Exibe a tabela com o CNAE agora!
     st.dataframe(
-        df.drop(columns=['Endereço', 'Nome Busca']), 
-        column_config={
-            "LinkedIn": st.column_config.LinkColumn("Pessoas"), 
-            "WhatsApp": st.column_config.LinkColumn("Busca Zap")
-        }, 
+        df.drop(columns=['Endereço', 'Nome Busca']),
+        column_config={"LinkedIn": st.column_config.LinkColumn("Pessoas"), "WhatsApp": st.column_config.LinkColumn("Zap")},
         hide_index=True, use_container_width=True
     )
-    
-    st.download_button("📥 Baixar Excel Completo", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="prospeccao_premium.csv", use_container_width=True)
+    st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
 
-    # --- SEÇÃO DE MAPA ---
+    # MAPA
     st.divider()
-    st.subheader("📍 Investigação Visual (Maps)")
-    emp_sel = st.selectbox("Selecione a empresa:", df["Empresa"].tolist())
+    emp_sel = st.selectbox("Investigar Fachada:", df["Empresa"].tolist())
     if emp_sel:
         row = df[df["Empresa"] == emp_sel].iloc[0]
+        st.warning(f"Status: {row['Status']} | Setor: {row['Atividade Principal']}")
         query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
-        st.info(f"📍 **Setor:** {row['Atividade Principal (CNAE)']} | **Endereço:** {row['Endereço']}")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
-
