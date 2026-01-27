@@ -61,6 +61,8 @@ def processar_lista(lista_cnpjs):
                     "Porte": porte,
                     "Faturamento Est.*": fat,
                     "Funcionários Est.*": func,
+                    "Capital Social": f"R$ {float(d.get('capital_social',0)):,.2f}",
+                    "Cidade/UF": f"{d.get('municipio', '')}/{d.get('uf', '')}",
                     "LinkedIn": f"https://www.linkedin.com/search/results/people/?keywords={nome_limpo.replace(' ', '%20')}%20(Comprador%20OR%20Suprimentos%20OR%20Compras)",
                     "WhatsApp": f"https://www.google.com.br/search?q=whatsapp+telefone+setor+compras+{(nome_limpo + ' ' + d.get('municipio', '')).replace(' ', '+')}",
                     "Endereço": endereco_completo,
@@ -77,7 +79,6 @@ with col_in2:
     entrada = st.text_area("Insira os CNPJs para análise:", height=150)
     iniciar = st.button("🚀 Iniciar Prospecção Inteligente", use_container_width=True)
 
-# Lógica de persistência dos dados
 if iniciar:
     if entrada:
         cnpjs = re.findall(r'\d+', entrada)
@@ -85,16 +86,12 @@ if iniciar:
             st.session_state.df_resultado = processar_lista(cnpjs)
         else:
             st.error("Nenhum CNPJ encontrado.")
-    else:
-        st.warning("Por favor, cole os CNPJs.")
 
-# Exibição dos resultados
 if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
     df = st.session_state.df_resultado
-    
     st.success(f"Análise de {len(df)} empresas concluída!")
     
-    # Exibe tabela sem as colunas internas de busca
+    # Exibe a tabela com TODAS as colunas importantes (incluindo Capital Social)
     st.dataframe(
         df.drop(columns=['Endereço', 'Nome Busca']), 
         column_config={
@@ -114,7 +111,6 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     
     if empresa_selecionada:
         row = df[df["Empresa"] == empresa_selecionada].iloc[0]
-        # Link limpo para o iframe
         query_mapa = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
         mapa_embed_url = f"https://www.google.com/maps?q={query_mapa}&output=embed"
         
