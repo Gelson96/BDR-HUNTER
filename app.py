@@ -9,7 +9,7 @@ st.set_page_config(page_title="BDR Hunter Pro | Inteligência", layout="wide", p
 
 # LINKS E ARQUIVOS DE IMAGEM
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
-ARQUIVO_ASSINATURA = "assinatura.png" # Nome exato do arquivo que você subiu no GitHub
+ARQUIVO_ASSINATURA = "Captura de tela 2026-01-27 143218.png" # Nome exato do arquivo que você subiu no GitHub
 
 # --- BARRA LATERAL ---
 with st.sidebar:
@@ -100,3 +100,4 @@ if st.button("🚀 Gerar Inteligência Premium"):
                 st.success(f"Sucesso! {len(df)} leads analisados.")
                 st.dataframe(df, column_config={"LinkedIn": st.column_config.LinkColumn("Decisores"), "WhatsApp (Busca)": st.column_config.LinkColumn("Contatos")}, hide_index=True)
                 st.download_button("📥 Baixar Relatório", df.to_csv(index=False).encode('utf-8-sig'), "prospeccao_bdr.csv")
+
