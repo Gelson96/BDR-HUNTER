@@ -1,0 +1,77 @@
+import streamlit as st
+import pandas as pd
+import requests
+import re
+import time
+
+# Configuração da página
+st.set_page_config(page_title="BDR Hunter Bot v4.0", layout="wide")
+
+st.title("🤖 BDR Hunter Bot")
+st.markdown("### Robô Especialista em Prospecção B2B")
+
+# Sidebar para configurações
+with st.sidebar:
+    st.header("Configurações")
+    api_key = st.text_input("Hunter.io API Key", type="password")
+    st.info("A chave API do Hunter permite encontrar e-mails reais.")
+
+# Função de limpeza de nome (essencial para links funcionarem)
+def limpar_nome_empresa(nome):
+    if not nome: return ""
+    termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL)\b'
+    nome_limpo = re.sub(termos, '', nome, flags=re.IGNORECASE)
+    return re.sub(r'\s+', ' ', nome_limpo).strip()
+
+# Função principal do Robô
+def processar(lista_cnpjs, h_key):
+    dados_finais = []
+    progresso = st.progress(0)
+    
+    for i, cnpj_bruto in enumerate(lista_cnpjs):
+        cnpj = "".join(filter(str.isdigit, str(cnpj_bruto))).zfill(14)
+        try:
+            res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
+            if res.status_code == 200:
+                d = res.json()
+                fantasia = d.get('nome_fantasia') or d.get('razao_social')
+                nome_busca = limpar_nome_empresa(fantasia)
+                
+                # Links Inteligentes
+                cargos = "(Comprador OR Suprimentos OR Procurement)"
+                l_link = f"https://www.linkedin.com/search/results/people/?keywords={nome_busca.replace(' ', '%20')}%20{cargos}"
+                g_link = f"https://www.google.com.br/search?q=telefone+whatsapp+compras+{nome_busca.replace(' ', '+')}"
+                
+                dados_finais.append({
+                    "Empresa": fantasia,
+                    "LinkedIn (Achar Pessoa)": l_link,
+                    "Google (Achar Whats)": g_link,
+                    "Tel Receita": d.get('ddd_telefone_1', 'N/D'),
+                    "Cidade/UF": f"{d.get('municipio')}/{d.get('uf')}"
+                })
+        except:
+            continue
+        progresso.progress((i + 1) / len(lista_cnpjs))
+    return pd.DataFrame(dados_finais)
+
+# Interface de entrada
+entrada = st.text_area("Cole aqui os CNPJs (um por linha):", height=200)
+
+if st.button("🚀 Gerar Lista de Prospecção"):
+    if entrada:
+        cnpjs = re.findall(r'\d+', entrada)
+        df = processar(cnpjs, api_key)
+        
+        if not df.empty:
+            st.success("Lista gerada com sucesso!")
+            # Torna os links clicáveis na visualização
+            st.dataframe(df, column_config={
+                "LinkedIn (Achar Pessoa)": st.column_config.LinkColumn(),
+                "Google (Achar Whats)": st.column_config.LinkColumn()
+            })
+            
+            # Botão de download
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 Baixar Planilha para Excel", data=csv, file_name="prospeccao_bdr.csv", mime="text/csv")
+    else:
+        st.error("Insira ao menos um CNPJ.")
