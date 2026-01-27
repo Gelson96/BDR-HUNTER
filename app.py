@@ -2,78 +2,95 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
+import time
 
-st.set_page_config(page_title="BDR Hunter Pro", layout="wide")
-
-# Barra lateral para colar a chave que você acabou de criar
-with st.sidebar:
-    st.title("Configurações")
-    apollo_api_key = st.text_input("Cole sua API Key do Apollo aqui", type="password")
-    st.info("A chave que você criou no Apollo liberará os telefones diretos.")
-
-def buscar_decisor_apollo(dominio, empresa, api_key):
-    url = "https://api.apollo.io/v1/people/match"
-    payload = {
-        "api_key": api_key,
-        "domain": dominio,
-        "organization_name": empresa,
-        "titles": ["comprador", "suprimentos", "procurement", "purchasing", "compras"]
-    }
-    try:
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            person = response.json().get('person', {})
-            return {
-                "Nome": person.get('name', 'Não encontrado'),
-                "Cargo": person.get('title', 'N/A'),
-                "Celular": person.get('sanitized_phone', 'N/D'),
-                "E-mail": person.get('email', 'N/D')
-            }
-    except:
-        pass
-    return {"Nome": "Não encontrado", "Cargo": "N/A", "Celular": "N/D", "E-mail": "N/D"}
+# Configuração da página
+st.set_page_config(page_title="BDR Hunter Bot v4.0", layout="wide")
 
 st.title("🤖 BDR Hunter - Localizador de Compradores")
-st.markdown("Insira os CNPJs para buscar o contato direto do decisor via Apollo.")
+st.markdown("### Cole os CNPJs para gerar links diretos de prospecção")
 
-txt_cnpjs = st.text_area("Cole os CNPJs (um por linha):", height=150)
+# Função para limpar o nome da empresa e melhorar a busca
+def limpar_nome_empresa(nome):
+    if not nome: return ""
+    # Remove termos que "sujam" a busca no LinkedIn/Google
+    termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL|MATRIZ)\b'
+    nome_limpo = re.sub(termos, '', nome, flags=re.IGNORECASE)
+    return re.sub(r'\s+', ' ', nome_limpo).strip()
 
-if st.button("🚀 Buscar Decisores e Telefones"):
-    if not apollo_api_key:
-        st.error("Por favor, insira sua API Key do Apollo na barra lateral.")
-    elif not txt_cnpjs:
-        st.warning("Insira pelo menos um CNPJ.")
-    else:
-        cnpjs = re.findall(r'\d+', txt_cnpjs)
-        lista_final = []
+def processar_lista(lista_cnpjs):
+    dados_finais = []
+    progresso = st.progress(0)
+    total = len(lista_cnpjs)
+    
+    for i, cnpj_bruto in enumerate(lista_cnpjs):
+        # Limpa o CNPJ para deixar apenas números
+        cnpj = "".join(filter(str.isdigit, str(cnpj_bruto))).zfill(14)
         
-        progresso = st.progress(0)
-        for i, cnpj in enumerate(cnpjs):
-            # Busca domínio na BrasilAPI (via e-mail de registro)
-            try:
-                res_br = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}").json()
-                razao = res_br.get('razao_social', 'N/A')
-                email_reg = res_br.get('email', '')
-                dominio = email_reg.split('@')[-1] if '@' in email_reg else ""
+        try:
+            # Consulta API gratuita BrasilAPI
+            res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
+            if res.status_code == 200:
+                d = res.json()
+                fantasia = d.get('nome_fantasia') or d.get('razao_social')
+                nome_busca = limpar_nome_empresa(fantasia)
                 
-                # Busca no Apollo
-                decisor = buscar_decisor_apollo(dominio, razao, apollo_api_key)
+                # Links Inteligentes de Prospecção
+                # Busca por Cargos de Decisão no LinkedIn
+                cargos = "(Comprador OR Suprimentos OR Procurement OR Purchasing)"
+                l_link = f"https://www.linkedin.com/search/results/people/?keywords={nome_busca.replace(' ', '%20')}%20{cargos}"
                 
-                lista_final.append({
-                    "Empresa": razao,
-                    "Comprador": decisor['Nome'],
-                    "Cargo": decisor['Cargo'],
-                    "WhatsApp/Celular": decisor['Celular'],
-                    "E-mail Direto": decisor['E-mail']
+                # Busca profunda por Telefone/WhatsApp no Google
+                g_link = f"https://www.google.com.br/search?q=telefone+whatsapp+setor+compras+{nome_busca.replace(' ', '+')}"
+                
+                dados_finais.append({
+                    "Empresa": fantasia,
+                    "LinkedIn (Achar Comprador)": l_link,
+                    "Google (WhatsApp/Tel Real)": g_link,
+                    "Telefone (Receita)": d.get('ddd_telefone_1', 'N/D'),
+                    "Cidade/UF": f"{d.get('municipio')}/{d.get('uf')}"
                 })
-            except:
-                continue
-            progresso.progress((i + 1) / len(cnpjs))
+        except Exception as e:
+            continue
             
-        df = pd.DataFrame(lista_final)
-        st.success("Busca concluída!")
-        st.dataframe(df)
+        # Atualiza a barra de progresso
+        progresso.progress((i + 1) / total)
         
-        # Botão para baixar o resultado
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Baixar Planilha para Prospecção", data=csv, file_name="leads_apollo.csv", mime="text/csv")
+    return pd.DataFrame(dados_finais)
+
+# Área de entrada de dados
+entrada = st.text_area("Cole aqui os CNPJs (um por linha ou separados por vírgula):", height=200)
+
+if st.button("🚀 Gerar Lista de Prospecção"):
+    if entrada:
+        # Extrai todos os números que pareçam CNPJs da entrada
+        cnpjs_encontrados = re.findall(r'\d+', entrada)
+        
+        if cnpjs_encontrados:
+            df_resultado = processar_lista(cnpjs_encontrados)
+            
+            if not df_resultado.empty:
+                st.success(f"Foram encontradas {len(df_resultado)} empresas!")
+                
+                # Exibe a tabela com links clicáveis
+                st.dataframe(
+                    df_resultado,
+                    column_config={
+                        "LinkedIn (Achar Comprador)": st.column_config.LinkColumn("Abrir LinkedIn"),
+                        "Google (WhatsApp/Tel Real)": st.column_config.LinkColumn("Buscar no Google")
+                    },
+                    hide_index=True
+                )
+                
+                # Botão para baixar Excel
+                csv = df_resultado.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 Baixar Planilha para Excel",
+                    data=csv,
+                    file_name="prospeccao_bdr.csv",
+                    mime="text/csv"
+                )
+        else:
+            st.error("Nenhum CNPJ válido foi identificado no texto colado.")
+    else:
+        st.warning("Por favor, cole os CNPJs antes de clicar no botão.")
