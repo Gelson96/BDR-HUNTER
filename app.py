@@ -3,45 +3,55 @@ import pandas as pd
 import requests
 import re
 
-# 1. Configuração da Página (Wide mode para usar toda a tela)
+# 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
 
 # Link da sua logo
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
 
-# --- CSS PARA CENTRALIZAR E AMPLIAR O LOGO ---
+# --- CSS PARA CENTRALIZAR TUDO ---
 st.markdown(
     f"""
     <style>
-    .centered-logo {{
+    /* Centraliza o Logo */
+    .centered-container {{
         display: flex;
+        flex-direction: column;
+        align-items: center;
         justify-content: center;
-        margin-bottom: 20px;
-    }}
-    .centered-logo img {{
-        width: 400px; /* Aumentei o tamanho aqui */
-    }}
-    .stTitle {{
         text-align: center;
+        width: 100%;
     }}
-    .stSubheader {{
-        text-align: center;
+    .centered-container img {{
+        width: 450px; /* Tamanho do logo */
+        margin-bottom: 10px;
+    }}
+    /* Centraliza Títulos nativos do Streamlit */
+    h1, h2, h3, .stSubheader {{
+        text-align: center !important;
+        width: 100%;
+    }}
+    /* Ajusta largura da área de texto */
+    .stTextArea {{
+        max-width: 1000px;
+        margin: 0 auto;
     }}
     </style>
-    <div class="centered-logo">
+    
+    <div class="centered-container">
         <img src="{URL_LOGO}">
     </div>
     """,
     unsafe_allow_html=True
 )
 
-# --- CABEÇALHO CENTRALIZADO ---
+# --- TÍTULOS CENTRALIZADOS ---
 st.title("BDR Hunter")
-st.markdown("<h3 style='text-align: center; color: gray;'>Inteligência de Mercado & Prospecção</h3>", unsafe_allow_html=True)
+st.subheader("Inteligência de Mercado & Prospecção Estratégica")
 
 st.divider()
 
-# --- FUNÇÕES DE INTELIGÊNCIA ---
+# --- FUNÇÕES DE LÓGICA ---
 def limpar_nome_empresa(nome):
     if not nome: return ""
     termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL|MATRIZ)\b'
@@ -53,24 +63,22 @@ def processar_inteligencia_premium(d):
     cap = d.get('capital_social', 0)
     
     if porte_cod in [1, "01"]:
-        porte, faturamento, funcionarios = "PEQUENO (ME)", "Até R$ 360.000*", "1 a 9*"
+        porte, fat, func = "PEQUENO (ME)", "Até R$ 360.000*", "1 a 9*"
     elif porte_cod in [3, "03"]:
-        porte, faturamento, funcionarios = "PEQUENO (EPP)", "R$ 360k a R$ 4,8 Milhões*", "10 a 49*"
+        porte, fat, func = "PEQUENO (EPP)", "R$ 360k a R$ 4,8 Milhões*", "10 a 49*"
     else:
         porte = "MÉDIO OU GRANDE"
         if cap > 10000000:
-            faturamento, funcionarios = "Acima de R$ 100 Milhões*", "500+*"
+            fat, func = "Acima de R$ 100 Milhões*", "500+*"
         elif cap > 1000000:
-            faturamento, funcionarios = "R$ 10M a R$ 50 Milhões*", "100 a 250*"
+            fat, func = "R$ 10M a R$ 50 Milhões*", "100 a 250*"
         else:
-            faturamento, funcionarios = "Acima de R$ 4,8 Milhões*", "50+*"
-            
-    return porte, faturamento, funcionarios
+            fat, func = "Acima de R$ 4,8 Milhões*", "50+*"
+    return porte, fat, func
 
 def processar_lista(lista_cnpjs):
     dados_finais = []
     progresso = st.progress(0)
-    
     for i, cnpj_bruto in enumerate(lista_cnpjs):
         cnpj = "".join(filter(str.isdigit, str(cnpj_bruto))).zfill(14)
         try:
@@ -95,43 +103,38 @@ def processar_lista(lista_cnpjs):
                     "Cidade/UF": f"{d.get('municipio')}/{d.get('uf')}",
                     "Capital Social": f"R$ {float(d.get('capital_social',0)):,.2f}"
                 })
-        except:
-            continue
+        except: continue
         progresso.progress((i + 1) / len(lista_cnpjs))
-        
     return pd.DataFrame(dados_finais)
 
-# --- INTERFACE DE ENTRADA (OCUPANDO TODA A LARGURA) ---
-entrada = st.text_area("Cole os CNPJs para análise completa:", height=150, placeholder="Ex: 00.000.000/0001-00")
-
-# Centralizar o botão
-col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 2])
-with col_btn2:
-    botao_clicado = st.button("🚀 Iniciar Prospecção", use_container_width=True)
-
-if botao_clicado:
-    if entrada:
-        cnpjs_encontrados = re.findall(r'\d+', entrada)
-        if cnpjs_encontrados:
-            df = processar_lista(cnpjs_encontrados)
-            
-            if not df.empty:
-                st.success(f"Análise de {len(df)} empresas concluída!")
-                
-                # Tabela em largura total
-                st.dataframe(
-                    df,
-                    column_config={
-                        "LinkedIn (Decisor)": st.column_config.LinkColumn("Ver Pessoas"),
-                        "Google (WhatsApp)": st.column_config.LinkColumn("Buscar Zap")
-                    },
-                    hide_index=True,
-                    use_container_width=True
-                )
-                
-                csv = df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 Baixar Planilha Unificada", data=csv, file_name="leads_bdr_premium.csv", use_container_width=True)
+# --- ÁREA CENTRALIZADA DE INPUT ---
+col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
+with col_in2:
+    entrada = st.text_area("Cole os CNPJs para análise completa:", height=150)
+    
+    # Botão Centralizado na coluna do meio
+    if st.button("🚀 Iniciar Prospecção Inteligente", use_container_width=True):
+        if entrada:
+            cnpjs = re.findall(r'\d+', entrada)
+            if cnpjs:
+                df = processar_lista(cnpjs)
+                if not df.empty:
+                    st.success(f"Análise de {len(df)} empresas concluída!")
+                    
+                    # Exibição da Tabela em largura total
+                    st.dataframe(
+                        df, 
+                        column_config={
+                            "LinkedIn (Decisor)": st.column_config.LinkColumn("Pessoas"), 
+                            "Google (WhatsApp)": st.column_config.LinkColumn("Buscar Zap")
+                        }, 
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                    
+                    csv = df.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("📥 Baixar Planilha Unificada", data=csv, file_name="leads_bdr.csv", use_container_width=True)
+            else:
+                st.error("Nenhum CNPJ detectado.")
         else:
-            st.error("Nenhum CNPJ encontrado.")
-    else:
-        st.warning("Por favor, cole os CNPJs.")
+            st.warning("Por favor, cole os CNPJs.")
