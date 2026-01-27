@@ -77,7 +77,7 @@ def processar_lista(lista_cnpjs):
 col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
 with col_in2:
     entrada = st.text_area("Insira os CNPJs:", height=150)
-    iniciar = st.button("🚀 Iniciar Análise Completa", use_container_width=True)
+    iniciar = st.button("🚀 Iniciar Análise Estratégica", use_container_width=True)
 
 if iniciar:
     if entrada:
@@ -111,3 +111,4 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
         st.info(f"📍 **Setor:** {row['Atividade Principal (CNAE)']} | **Endereço:** {row['Endereço']}")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
+
