@@ -88,7 +88,7 @@ def processar_lista(lista_cnpjs):
 col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
 with col_in2:
     entrada = st.text_area("Insira os CNPJs para análise de risco e porte:", height=150)
-    if st.button("🚀 Iniciar Varredura Premium", use_container_width=True):
+    if st.button("🚀 Iniciar Análise Estratégica", use_container_width=True):
         if entrada:
             cnpjs = re.findall(r'\d+', entrada)
             if cnpjs: st.session_state.df_resultado = processar_lista(cnpjs)
@@ -110,3 +110,4 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         st.warning(f"Status: {row['Status']} | Setor: {row['Atividade Principal']}")
         query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
+
