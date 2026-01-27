@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import re
 
-st.set_page_config(page_title="BDR Hunter Pro - Inteligência de Mercado", layout="wide")
+st.set_page_config(page_title="BDR Hunter Pro", layout="wide")
 
 st.title("🤖 BDR Hunter - Inteligência de Mercado")
 st.markdown("### Extração de CNPJ com Porte, Capital Social e Links de Prospecção")
@@ -24,8 +24,11 @@ def processar_lista(lista_cnpjs):
     dados_finais = []
     progresso = st.progress(0)
     
-    # Dicionário para traduzir o Porte
-    portes = {
+    # Dicionário de Portes atualizado e mais robusto
+    portes_map = {
+        1: "ME (Microempresa)",
+        3: "EPP (Empresa de Pequeno Porte)",
+        5: "Demais (Médio/Grande Porte)",
         "01": "ME (Microempresa)",
         "03": "EPP (Empresa de Pequeno Porte)",
         "05": "Demais (Médio/Grande Porte)"
@@ -40,13 +43,17 @@ def processar_lista(lista_cnpjs):
                 fantasia = d.get('nome_fantasia') or d.get('razao_social')
                 nome_busca = limpar_nome_empresa(fantasia)
                 
-                # Inteligência de Prospecção
+                # Tradução do Porte com fallback para o valor bruto
+                porte_valor = d.get('porte')
+                porte_texto = portes_map.get(porte_valor, f"Porte Código: {porte_valor}")
+                
+                # Links Inteligentes
                 l_link = f"https://www.linkedin.com/search/results/people/?keywords={nome_busca.replace(' ', '%20')}%20(Comprador%20OR%20Suprimentos)"
                 g_link = f"https://www.google.com.br/search?q=telefone+whatsapp+compras+{nome_busca.replace(' ', '+')}"
                 
                 dados_finais.append({
                     "Empresa": fantasia,
-                    "Porte": portes.get(d.get('porte'), "Não Informado"),
+                    "Porte": porte_texto,
                     "Capital Social": formatar_moeda(d.get('capital_social')),
                     "LinkedIn": l_link,
                     "WhatsApp (Busca)": g_link,
@@ -67,7 +74,7 @@ if st.button("🚀 Gerar Inteligência de Vendas"):
         df = processar_lista(cnpjs)
         
         if not df.empty:
-            st.success("Dados extraídos!")
+            st.success("Dados extraídos com sucesso!")
             st.dataframe(
                 df,
                 column_config={
