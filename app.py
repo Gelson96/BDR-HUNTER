@@ -2,76 +2,78 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-import time
 
-# Configuração da página
-st.set_page_config(page_title="BDR Hunter Bot v4.0", layout="wide")
+st.set_page_config(page_title="BDR Hunter Pro", layout="wide")
 
-st.title("🤖 BDR Hunter Bot")
-st.markdown("### Robô Especialista em Prospecção B2B")
-
-# Sidebar para configurações
+# Barra lateral para colar a chave que você acabou de criar
 with st.sidebar:
-    st.header("Configurações")
-    api_key = st.text_input("Hunter.io API Key", type="password")
-    st.info("A chave API do Hunter permite encontrar e-mails reais.")
+    st.title("Configurações")
+    apollo_api_key = st.text_input("Cole sua API Key do Apollo aqui", type="password")
+    st.info("A chave que você criou no Apollo liberará os telefones diretos.")
 
-# Função de limpeza de nome (essencial para links funcionarem)
-def limpar_nome_empresa(nome):
-    if not nome: return ""
-    termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL)\b'
-    nome_limpo = re.sub(termos, '', nome, flags=re.IGNORECASE)
-    return re.sub(r'\s+', ' ', nome_limpo).strip()
+def buscar_decisor_apollo(dominio, empresa, api_key):
+    url = "https://api.apollo.io/v1/people/match"
+    payload = {
+        "api_key": api_key,
+        "domain": dominio,
+        "organization_name": empresa,
+        "titles": ["comprador", "suprimentos", "procurement", "purchasing", "compras"]
+    }
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            person = response.json().get('person', {})
+            return {
+                "Nome": person.get('name', 'Não encontrado'),
+                "Cargo": person.get('title', 'N/A'),
+                "Celular": person.get('sanitized_phone', 'N/D'),
+                "E-mail": person.get('email', 'N/D')
+            }
+    except:
+        pass
+    return {"Nome": "Não encontrado", "Cargo": "N/A", "Celular": "N/D", "E-mail": "N/D"}
 
-# Função principal do Robô
-def processar(lista_cnpjs, h_key):
-    dados_finais = []
-    progresso = st.progress(0)
-    
-    for i, cnpj_bruto in enumerate(lista_cnpjs):
-        cnpj = "".join(filter(str.isdigit, str(cnpj_bruto))).zfill(14)
-        try:
-            res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
-            if res.status_code == 200:
-                d = res.json()
-                fantasia = d.get('nome_fantasia') or d.get('razao_social')
-                nome_busca = limpar_nome_empresa(fantasia)
-                
-                # Links Inteligentes
-                cargos = "(Comprador OR Suprimentos OR Procurement)"
-                l_link = f"https://www.linkedin.com/search/results/people/?keywords={nome_busca.replace(' ', '%20')}%20{cargos}"
-                g_link = f"https://www.google.com.br/search?q=telefone+whatsapp+compras+{nome_busca.replace(' ', '+')}"
-                
-                dados_finais.append({
-                    "Empresa": fantasia,
-                    "LinkedIn (Achar Pessoa)": l_link,
-                    "Google (Achar Whats)": g_link,
-                    "Tel Receita": d.get('ddd_telefone_1', 'N/D'),
-                    "Cidade/UF": f"{d.get('municipio')}/{d.get('uf')}"
-                })
-        except:
-            continue
-        progresso.progress((i + 1) / len(lista_cnpjs))
-    return pd.DataFrame(dados_finais)
+st.title("🤖 BDR Hunter - Localizador de Compradores")
+st.markdown("Insira os CNPJs para buscar o contato direto do decisor via Apollo.")
 
-# Interface de entrada
-entrada = st.text_area("Cole aqui os CNPJs (um por linha):", height=200)
+txt_cnpjs = st.text_area("Cole os CNPJs (um por linha):", height=150)
 
-if st.button("🚀 Gerar Lista de Prospecção"):
-    if entrada:
-        cnpjs = re.findall(r'\d+', entrada)
-        df = processar(cnpjs, api_key)
-        
-        if not df.empty:
-            st.success("Lista gerada com sucesso!")
-            # Torna os links clicáveis na visualização
-            st.dataframe(df, column_config={
-                "LinkedIn (Achar Pessoa)": st.column_config.LinkColumn(),
-                "Google (Achar Whats)": st.column_config.LinkColumn()
-            })
-            
-            # Botão de download
-            csv = df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Baixar Planilha para Excel", data=csv, file_name="prospeccao_bdr.csv", mime="text/csv")
+if st.button("🚀 Buscar Decisores e Telefones"):
+    if not apollo_api_key:
+        st.error("Por favor, insira sua API Key do Apollo na barra lateral.")
+    elif not txt_cnpjs:
+        st.warning("Insira pelo menos um CNPJ.")
     else:
-        st.error("Insira ao menos um CNPJ.")
+        cnpjs = re.findall(r'\d+', txt_cnpjs)
+        lista_final = []
+        
+        progresso = st.progress(0)
+        for i, cnpj in enumerate(cnpjs):
+            # Busca domínio na BrasilAPI (via e-mail de registro)
+            try:
+                res_br = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}").json()
+                razao = res_br.get('razao_social', 'N/A')
+                email_reg = res_br.get('email', '')
+                dominio = email_reg.split('@')[-1] if '@' in email_reg else ""
+                
+                # Busca no Apollo
+                decisor = buscar_decisor_apollo(dominio, razao, apollo_api_key)
+                
+                lista_final.append({
+                    "Empresa": razao,
+                    "Comprador": decisor['Nome'],
+                    "Cargo": decisor['Cargo'],
+                    "WhatsApp/Celular": decisor['Celular'],
+                    "E-mail Direto": decisor['E-mail']
+                })
+            except:
+                continue
+            progresso.progress((i + 1) / len(cnpjs))
+            
+        df = pd.DataFrame(lista_final)
+        st.success("Busca concluída!")
+        st.dataframe(df)
+        
+        # Botão para baixar o resultado
+        csv = df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Baixar Planilha para Prospecção", data=csv, file_name="leads_apollo.csv", mime="text/csv")
