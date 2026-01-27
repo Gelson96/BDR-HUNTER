@@ -22,7 +22,7 @@ st.markdown(
 )
 
 st.title("BDR Hunter")
-st.subheader("Inteligência de Mercado, Setores & Risco")
+st.subheader("Inteligência de Mercado & Prospecção")
 st.divider()
 
 # --- FUNÇÕES ---
@@ -110,4 +110,5 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         st.warning(f"Status: {row['Status']} | Setor: {row['Atividade Principal']}")
         query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
+
 
