@@ -9,19 +9,12 @@ st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_i
 # Link da sua logo fornecido
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
 
-# --- BARRA LATERAL COM LOGO ---
-with st.sidebar:
-    st.image(URL_LOGO, use_container_width=True)
-    st.divider()
-    st.markdown("### 🛠️ Configurações")
-    st.info("O robô utiliza a inteligência de dados da Receita Federal + Buscas Estratégicas.")
-
 # --- CABEÇALHO ---
 col1, col2 = st.columns([1, 5])
 with col1:
     st.image(URL_LOGO, width=150)
 with col2:
-    st.title("BDR Hunter - Unificado")
+    st.title("BDR Hunter")
     st.subheader("Inteligência de Mercado & Prospecção")
 
 st.divider()
@@ -122,3 +115,4 @@ if st.button("🚀 Iniciar Prospecção Inteligente"):
             st.error("Nenhum CNPJ encontrado.")
     else:
         st.warning("Por favor, cole os CNPJs.")
+
