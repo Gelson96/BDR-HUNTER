@@ -53,4 +53,70 @@ def processar_lista(lista_cnpjs):
                 d = res.json()
                 porte, fat, func = processar_inteligencia_premium(d)
                 fantasia = d.get('nome_fantasia') or d.get('razao_social')
-                nome_limpo = limpar_nome
+                nome_limpo = limpar_nome_empresa(fantasia)
+                endereco_completo = f"{d.get('logradouro', '')}, {d.get('numero', '')} - {d.get('municipio', '')}/{d.get('uf', '')}"
+                
+                dados_finais.append({
+                    "Empresa": fantasia,
+                    "Porte": porte,
+                    "Faturamento Est.*": fat,
+                    "Funcionários Est.*": func,
+                    "LinkedIn": f"https://www.linkedin.com/search/results/people/?keywords={nome_limpo.replace(' ', '%20')}%20(Comprador%20OR%20Suprimentos%20OR%20Compras)",
+                    "WhatsApp": f"https://www.google.com.br/search?q=whatsapp+telefone+setor+compras+{(nome_limpo + ' ' + d.get('municipio', '')).replace(' ', '+')}",
+                    "Endereço": endereco_completo,
+                    "Nome Busca": nome_limpo
+                })
+        except Exception as e:
+            continue
+        progresso.progress((i + 1) / len(lista_cnpjs))
+    return pd.DataFrame(dados_finais)
+
+# --- INTERFACE ---
+col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
+with col_in2:
+    entrada = st.text_area("Insira os CNPJs para análise:", height=150)
+    iniciar = st.button("🚀 Iniciar Prospecção Inteligente", use_container_width=True)
+
+# Lógica de persistência dos dados
+if iniciar:
+    if entrada:
+        cnpjs = re.findall(r'\d+', entrada)
+        if cnpjs:
+            st.session_state.df_resultado = processar_lista(cnpjs)
+        else:
+            st.error("Nenhum CNPJ encontrado.")
+    else:
+        st.warning("Por favor, cole os CNPJs.")
+
+# Exibição dos resultados
+if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
+    df = st.session_state.df_resultado
+    
+    st.success(f"Análise de {len(df)} empresas concluída!")
+    
+    # Exibe tabela sem as colunas internas de busca
+    st.dataframe(
+        df.drop(columns=['Endereço', 'Nome Busca']), 
+        column_config={
+            "LinkedIn": st.column_config.LinkColumn("Pessoas"), 
+            "WhatsApp": st.column_config.LinkColumn("Busca Zap")
+        }, 
+        hide_index=True, use_container_width=True
+    )
+    
+    st.download_button("📥 Baixar Planilha Unificada", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="leads_bdr.csv", use_container_width=True)
+
+    # --- SEÇÃO DE MAPA ---
+    st.divider()
+    st.subheader("📍 Visualização de Fachada (Google Maps)")
+    
+    empresa_selecionada = st.selectbox("Selecione a empresa para ver o mapa:", df["Empresa"].tolist())
+    
+    if empresa_selecionada:
+        row = df[df["Empresa"] == empresa_selecionada].iloc[0]
+        # Link limpo para o iframe
+        query_mapa = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
+        mapa_embed_url = f"https://www.google.com/maps?q={query_mapa}&output=embed"
+        
+        st.info(f"🏠 **Endereço:** {row['Endereço']}")
+        st.components.v1.iframe(mapa_embed_url, height=450, scrolling=False)
