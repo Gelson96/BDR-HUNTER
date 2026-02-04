@@ -28,6 +28,37 @@ st.markdown(
         font-weight: bold;
         margin: 10px 0;
     }}
+    .noticia-box {{
+        background: #f8f9fa;
+        border-left: 4px solid #667eea;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }}
+    .noticia-titulo {{
+        font-weight: bold;
+        color: #333;
+        margin-bottom: 5px;
+    }}
+    .noticia-fonte {{
+        font-size: 0.85em;
+        color: #666;
+        margin-top: 5px;
+    }}
+    .alerta-box {{
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }}
+    .sucesso-box {{
+        background: #d4edda;
+        border-left: 4px solid #28a745;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }}
     </style>
     <div class="centered-container"><img src="{URL_LOGO}"></div>
     """,
@@ -80,6 +111,16 @@ def verificar_situacao_especial(d):
         return f"🚫 {d.get('descricao_situacao_cadastral')}"
     return "✅ REGULAR"
 
+def buscar_filiais_cnpj(cnpj_base):
+    """Busca quantidade de filiais usando o CNPJ raiz (8 primeiros dígitos)"""
+    try:
+        cnpj_raiz = cnpj_base[:8]
+        # A API da Receita tem limitações, então fazemos uma busca simples
+        # Em produção, você poderia usar APIs pagas como Serpro ou outros serviços
+        return "Consulte manualmente"  # Placeholder
+    except:
+        return "N/D"
+
 def processar_lista(lista_cnpjs):
     dados_finais = []
     progresso = st.progress(0)
@@ -96,8 +137,14 @@ def processar_lista(lista_cnpjs):
                 fantasia = d.get('nome_fantasia') or d.get('razao_social')
                 status_emp = verificar_situacao_especial(d)
                 
+                # Identifica se é matriz ou filial
+                tipo_estabelecimento = "🏢 MATRIZ" if d.get('identificador_matriz_filial') == 1 else "🏪 FILIAL"
+                
                 dados_finais.append({
                     "Empresa": fantasia,
+                    "Razão Social": d.get('razao_social'),
+                    "CNPJ": cnpj,
+                    "Tipo": tipo_estabelecimento,
                     "Status": status_emp,
                     "Atividade Principal": d.get('cnae_fiscal_descricao', 'N/I'),
                     "Porte": porte,
@@ -132,7 +179,7 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     df = st.session_state.df_resultado
     
     st.dataframe(
-        df.drop(columns=['Endereço', 'Nome Busca', 'Faturamento_Min', 'Faturamento_Max']),
+        df.drop(columns=['Endereço', 'Nome Busca', 'Faturamento_Min', 'Faturamento_Max', 'Razão Social', 'CNPJ']),
         column_config={
             "LinkedIn": st.column_config.LinkColumn("Pessoas"), 
             "WhatsApp": st.column_config.LinkColumn("Zap")
@@ -259,11 +306,108 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     
     st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
 
-    # MAPA
+    # --- SEÇÃO DE INTELIGÊNCIA DE MERCADO ---
     st.divider()
-    emp_sel = st.selectbox("Investigar Fachada:", df["Empresa"].tolist())
+    st.markdown("### 🔍 Inteligência de Mercado")
+    st.markdown("Selecione uma empresa para ver notícias, expansões, unidades e informações estratégicas:")
+    
+    emp_sel = st.selectbox("🏭 Selecione a Empresa:", df["Empresa"].tolist())
+    
     if emp_sel:
         row = df[df["Empresa"] == emp_sel].iloc[0]
-        st.warning(f"Status: {row['Status']} | Setor: {row['Atividade Principal']}")
+        
+        # Box com informações básicas
+        col_info1, col_info2, col_info3 = st.columns(3)
+        with col_info1:
+            st.markdown(f"""
+            <div class="sucesso-box">
+                <strong>🏢 Empresa:</strong> {row['Empresa']}<br>
+                <strong>🆔 Tipo:</strong> {row['Tipo']}<br>
+                <strong>📊 Status:</strong> {row['Status']}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_info2:
+            st.markdown(f"""
+            <div class="sucesso-box">
+                <strong>🏭 Setor:</strong> {row['Atividade Principal'][:50]}...<br>
+                <strong>📏 Porte:</strong> {row['Porte']}<br>
+                <strong>📍 Localização:</strong> {row['Cidade/UF']}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_info3:
+            st.markdown(f"""
+            <div class="sucesso-box">
+                <strong>💰 Faturamento Est.:</strong> {row['Faturamento Est.*']}<br>
+                <strong>👥 Funcionários Est.:</strong> {row['Funcionários Est.*']}<br>
+                <strong>💼 Capital Social:</strong> {row['Capital Social']}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Botão para buscar inteligência de mercado
+        if st.button(f"🔎 Buscar Inteligência de Mercado sobre {row['Nome Busca']}", use_container_width=True):
+            with st.spinner("🔍 Buscando notícias e informações estratégicas..."):
+                
+                # Container para as informações
+                st.markdown("#### 📰 Notícias e Movimentações Recentes")
+                
+                # Aqui você precisaria implementar a busca real
+                # Como exemplo, vou criar um placeholder que mostra como seria
+                st.markdown(f"""
+                <div class="noticia-box">
+                    <div class="noticia-titulo">🔍 Buscando informações sobre: {row['Nome Busca']}</div>
+                    <p>Pesquisando por:</p>
+                    <ul>
+                        <li>✅ Expansão de fábricas</li>
+                        <li>✅ Fechamento de unidades</li>
+                        <li>✅ Novos investimentos</li>
+                        <li>✅ Fusões e aquisições</li>
+                        <li>✅ Quantidade de filiais</li>
+                        <li>✅ Notícias recentes do setor</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Links de busca automática
+                st.markdown("#### 🔗 Fontes de Pesquisa Recomendadas")
+                col_links1, col_links2 = st.columns(2)
+                
+                with col_links1:
+                    nome_busca = row['Nome Busca'].replace(' ', '+')
+                    st.markdown(f"🌐 [Notícias no Google](https://www.google.com/search?q={nome_busca}+expansão+OR+fábrica+OR+investimento+OR+filiais&tbm=nws)")
+                    st.markdown(f"📊 [Pesquisa Geral](https://www.google.com/search?q={nome_busca}+unidades+filiais+fábricas)")
+                    st.markdown(f"💼 [LinkedIn da Empresa](https://www.linkedin.com/search/results/companies/?keywords={nome_busca})")
+                
+                with col_links2:
+                    st.markdown(f"📈 [Informações Financeiras](https://www.google.com/search?q={nome_busca}+balanço+OR+resultado+OR+faturamento)")
+                    st.markdown(f"🏭 [Unidades e Fábricas](https://www.google.com/search?q={nome_busca}+onde+fica+fábrica+OR+unidades)")
+                    st.markdown(f"📰 [Últimas Notícias](https://www.google.com/search?q={nome_busca}&tbm=nws&tbs=qdr:m)")
+                
+                # Informação sobre CNPJ raiz para buscar filiais
+                st.markdown("#### 🏢 Identificação de Filiais")
+                cnpj_raiz = row['CNPJ'][:8]
+                st.markdown(f"""
+                <div class="alerta-box">
+                    <strong>🔢 CNPJ Raiz:</strong> {cnpj_raiz}<br>
+                    <strong>💡 Dica:</strong> Para encontrar todas as filiais desta empresa, pesquise CNPJs que comecem com {cnpj_raiz} no portal da Receita Federal ou em bases de dados corporativas.
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"🔗 [Consultar CNPJs no portal da Receita](https://servicos.receita.fazenda.gov.br/Servicos/cnpjreva/Cnpjreva_Solicitacao.asp)")
+                
+                # Análise de contexto setorial
+                st.markdown("#### 📊 Contexto Setorial")
+                st.markdown(f"🔍 [Tendências do Setor](https://www.google.com/search?q={row['Atividade Principal'][:30].replace(' ', '+')}+tendências+mercado+brasil&tbm=nws)")
+
+    # MAPA
+    st.divider()
+    st.markdown("### 🗺️ Investigação de Localização")
+    if emp_sel:
+        row = df[df["Empresa"] == emp_sel].iloc[0]
+        st.warning(f"📍 **{row['Empresa']}** | Status: {row['Status']} | Setor: {row['Atividade Principal']}")
         query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
+
+st.markdown("---")
+st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson96 | Inteligência estratégica para prospecção B2B")
