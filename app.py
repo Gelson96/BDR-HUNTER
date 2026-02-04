@@ -15,6 +15,19 @@ st.markdown(
     .centered-container {{ display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; width: 100%; }}
     .centered-container img {{ width: 400px; margin-bottom: 10px; }}
     h1, h2, h3, .stSubheader {{ text-align: center !important; width: 100%; }}
+    .potencial-box {{ 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 20px 0;
+    }}
+    .potencial-valor {{
+        font-size: 2.5em;
+        font-weight: bold;
+        margin: 10px 0;
+    }}
     </style>
     <div class="centered-container"><img src="{URL_LOGO}"></div>
     """,
@@ -35,12 +48,17 @@ def limpar_nome_empresa(nome):
 def processar_inteligencia_premium(d):
     porte_cod = d.get('porte')
     cap = d.get('capital_social', 0)
-    if porte_cod in [1, "01"]: return "PEQUENO (ME)", "Até R$ 360k*", "1-9*"
-    elif porte_cod in [3, "03"]: return "PEQUENO (EPP)", "R$ 360k-4,8M*", "10-49*"
+    if porte_cod in [1, "01"]: 
+        return "PEQUENO (ME)", "Até R$ 360k*", "1-9*", 360000
+    elif porte_cod in [3, "03"]: 
+        return "PEQUENO (EPP)", "R$ 360k-4,8M*", "10-49*", 2400000  # Média
     else:
-        if cap > 10000000: return "GRANDE", "100M+*", "500+*"
-        elif cap > 1000000: return "MÉDIO", "10M-50M*", "100-250*"
-        else: return "MÉDIO", "4,8M+*", "50+*"
+        if cap > 10000000: 
+            return "GRANDE", "100M+*", "500+*", 100000000
+        elif cap > 1000000: 
+            return "MÉDIO", "10M-50M*", "100-250*", 30000000  # Média
+        else: 
+            return "MÉDIO", "4,8M+*", "50+*", 10000000
 
 def verificar_situacao_especial(d):
     # Verifica no nome e na situação especial da Receita
@@ -62,7 +80,7 @@ def processar_lista(lista_cnpjs):
             res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
             if res.status_code == 200:
                 d = res.json()
-                porte, fat, func = processar_inteligencia_premium(d)
+                porte, fat, func, fat_anual = processar_inteligencia_premium(d)
                 fantasia = d.get('nome_fantasia') or d.get('razao_social')
                 status = verificar_situacao_especial(d)
                 
@@ -78,7 +96,8 @@ def processar_lista(lista_cnpjs):
                     "LinkedIn": f"https://www.linkedin.com/search/results/people/?keywords={limpar_nome_empresa(fantasia).replace(' ', '%20')}%20(Comprador%20OR%20Suprimentos)",
                     "WhatsApp": f"https://www.google.com.br/search?q=whatsapp+telefone+setor+compras+{fantasia.replace(' ', '+')}",
                     "Endereço": f"{d.get('logradouro')}, {d.get('numero')} - {d.get('municipio')}",
-                    "Nome Busca": limpar_nome_empresa(fantasia)
+                    "Nome Busca": limpar_nome_empresa(fantasia),
+                    "Faturamento_Numerico": fat_anual
                 })
         except: continue
         progresso.progress((i + 1) / len(lista_cnpjs))
@@ -96,10 +115,43 @@ with col_in2:
 if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
     df = st.session_state.df_resultado
     st.dataframe(
-        df.drop(columns=['Endereço', 'Nome Busca']),
+        df.drop(columns=['Endereço', 'Nome Busca', 'Faturamento_Numerico']),
         column_config={"LinkedIn": st.column_config.LinkColumn("Pessoas"), "WhatsApp": st.column_config.LinkColumn("Zap")},
         hide_index=True, use_container_width=True
     )
+    
+    # --- CÁLCULO DE POTENCIAL DE EMBALAGENS ---
+    st.divider()
+    st.markdown("### 📦 Potencial de Compra de Embalagens")
+    
+    potencial_anual_total = df['Faturamento_Numerico'].sum() * 0.03
+    potencial_mensal_total = potencial_anual_total / 12
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(
+            f"""
+            <div class="potencial-box">
+                <div style="font-size: 1.2em;">💰 Potencial Anual (3% do Faturamento)</div>
+                <div class="potencial-valor">R$ {potencial_anual_total:,.2f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    with col2:
+        st.markdown(
+            f"""
+            <div class="potencial-box">
+                <div style="font-size: 1.2em;">📅 Potencial Mensal</div>
+                <div class="potencial-valor">R$ {potencial_mensal_total:,.2f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    st.info("💡 **Estimativa baseada em:** 3% do faturamento anual médio estimado de todas as empresas analisadas.")
+    
     st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
 
     # MAPA
@@ -110,7 +162,3 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         st.warning(f"Status: {row['Status']} | Setor: {row['Atividade Principal']}")
         query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
-
-
-
-
