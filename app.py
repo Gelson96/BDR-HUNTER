@@ -127,13 +127,29 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     potencial_anual_total = df['Faturamento_Numerico'].sum() * 0.03
     potencial_mensal_total = potencial_anual_total / 12
     
-    col1, col2 = st.columns(2)
+    # Campo para preço médio do kg
+    col_preco1, col_preco2, col_preco3 = st.columns([1, 2, 1])
+    with col_preco2:
+        preco_kg = st.number_input(
+            "💵 Preço médio do KG de embalagem (R$):",
+            min_value=0.01,
+            value=15.00,
+            step=0.50,
+            format="%.2f"
+        )
+    
+    # Cálculo de quantidade em kg
+    kg_mensal = potencial_mensal_total / preco_kg if preco_kg > 0 else 0
+    kg_anual = potencial_anual_total / preco_kg if preco_kg > 0 else 0
+    
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(
             f"""
             <div class="potencial-box">
-                <div style="font-size: 1.2em;">💰 Potencial Anual (3% do Faturamento)</div>
+                <div style="font-size: 1.2em;">💰 Potencial Anual</div>
                 <div class="potencial-valor">R$ {potencial_anual_total:,.2f}</div>
+                <div style="font-size: 1.1em; margin-top: 10px;">⚖️ {kg_anual:,.2f} kg</div>
             </div>
             """,
             unsafe_allow_html=True
@@ -145,6 +161,19 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             <div class="potencial-box">
                 <div style="font-size: 1.2em;">📅 Potencial Mensal</div>
                 <div class="potencial-valor">R$ {potencial_mensal_total:,.2f}</div>
+                <div style="font-size: 1.1em; margin-top: 10px;">⚖️ {kg_mensal:,.2f} kg</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    with col3:
+        st.markdown(
+            f"""
+            <div class="potencial-box">
+                <div style="font-size: 1.2em;">📊 Preço/KG</div>
+                <div class="potencial-valor">R$ {preco_kg:,.2f}</div>
+                <div style="font-size: 1.1em; margin-top: 10px;">💼 Valor configurado</div>
             </div>
             """,
             unsafe_allow_html=True
