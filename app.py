@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 # 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
 
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
+NEWS_API_KEY = "70ca4eed60fc4e2583b83063862105c5"
 
 # --- CSS ---
 st.markdown(
@@ -81,19 +82,6 @@ st.markdown(
         margin: 10px 0;
         border-radius: 5px;
     }}
-    .destaque-box {{
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        margin: 15px 0;
-        text-align: center;
-    }}
-    .destaque-numero {{
-        font-size: 3em;
-        font-weight: bold;
-        margin: 10px 0;
-    }}
     </style>
     <div class="centered-container"><img src="{URL_LOGO}"></div>
     """,
@@ -110,6 +98,96 @@ def limpar_nome_empresa(nome):
     termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL|MATRIZ)\b'
     nome_limpo = re.sub(termos, '', nome, flags=re.IGNORECASE)
     return re.sub(r'\s+', ' ', nome_limpo).strip()
+
+def buscar_noticias_newsapi(empresa_nome, tipo_busca="empresa"):
+    """Busca notícias usando NewsAPI"""
+    try:
+        nome_limpo = limpar_nome_empresa(empresa_nome)
+        
+        # Define query baseada no tipo de busca
+        if tipo_busca == "empresa":
+            query = f'"{nome_limpo}" AND (expansão OR fábrica OR investimento OR fechamento OR demissão OR contratação)'
+        else:  # setor
+            query = f'{nome_limpo} AND (mercado OR setor OR tendência OR crescimento)'
+        
+        # Data de 6 meses atrás
+        data_inicial = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+        
+        url = f"https://newsapi.org/v2/everything"
+        params = {
+            'q': query,
+            'from': data_inicial,
+            'language': 'pt',
+            'sortBy': 'relevancy',
+            'pageSize': 10,
+            'apiKey': NEWS_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            noticias = []
+            
+            for article in data.get('articles', [])[:5]:  # Limita a 5 notícias
+                # Classifica a notícia
+                titulo_desc = (article.get('title', '') + ' ' + article.get('description', '')).lower()
+                
+                if any(palavra in titulo_desc for palavra in ['expansão', 'ampliação', 'nova fábrica', 'investimento', 'inaugura']):
+                    categoria = "expansao"
+                    icone = "🏭"
+                    cor = "#28a745"
+                elif any(palavra in titulo_desc for palavra in ['fechamento', 'encerra', 'demissão', 'layoff']):
+                    categoria = "crise"
+                    icone = "⚠️"
+                    cor = "#dc3545"
+                elif any(palavra in titulo_desc for palavra in ['lucro', 'faturamento', 'receita', 'resultado']):
+                    categoria = "financeiro"
+                    icone = "💰"
+                    cor = "#007bff"
+                else:
+                    categoria = "geral"
+                    icone = "📌"
+                    cor = "#667eea"
+                
+                # Formata data
+                try:
+                    data_pub = datetime.fromisoformat(article.get('publishedAt', '').replace('Z', '+00:00'))
+                    data_formatada = data_pub.strftime('%d/%m/%Y')
+                except:
+                    data_formatada = "Data não disponível"
+                
+                noticias.append({
+                    'titulo': article.get('title', 'Sem título'),
+                    'conteudo': article.get('description', 'Sem descrição disponível'),
+                    'fonte': article.get('source', {}).get('name', 'Fonte desconhecida'),
+                    'data': data_formatada,
+                    'categoria': categoria,
+                    'icone': icone,
+                    'cor': cor,
+                    'url': article.get('url', '#')
+                })
+            
+            return noticias
+        else:
+            return []
+            
+    except Exception as e:
+        st.error(f"Erro ao buscar notícias: {str(e)}")
+        return []
+
+def buscar_filiais_cnpj(cnpj_raiz):
+    """Busca informações sobre outras unidades da empresa"""
+    try:
+        # Nota: A BrasilAPI não retorna lista de filiais, apenas dados do CNPJ específico
+        # Esta função retorna informações básicas e orientações
+        return {
+            'cnpj_raiz': cnpj_raiz,
+            'mensagem': 'Para consultar todas as filiais, use o portal da Receita Federal ou APIs especializadas (Serpro, ReceitaWS Premium).',
+            'possui_filiais': 'Verificar manualmente'
+        }
+    except:
+        return None
 
 def processar_inteligencia_premium(d):
     porte_cod = d.get('porte')
@@ -137,57 +215,6 @@ def verificar_situacao_especial(d):
     if d.get('descricao_situacao_cadastral') != "ATIVA":
         return f"🚫 {d.get('descricao_situacao_cadastral')}"
     return "✅ REGULAR"
-
-def buscar_quantidade_filiais(cnpj):
-    """
-    Busca a quantidade total de estabelecimentos (matriz + filiais) usando CNPJ raiz
-    Utiliza a API da ReceitaWS como alternativa
-    """
-    try:
-        cnpj_raiz = cnpj[:8]
-        
-        # Método 1: Tentar via BrasilAPI (pode não ter essa funcionalidade)
-        # Método 2: Usar ReceitaWS (mais completo)
-        url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
-        response = requests.get(url)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # A ReceitaWS retorna informações, mas não lista todas filiais
-            # Vamos buscar informações adicionais
-            qsa_count = len(data.get('qsa', [])) if data.get('qsa') else 0
-            
-            # Informação básica
-            info = {
-                'cnpj_raiz': cnpj_raiz,
-                'razao_social': data.get('nome', 'N/D'),
-                'tipo': 'MATRIZ' if data.get('tipo', '') == 'MATRIZ' else 'FILIAL',
-                'qtd_filiais_estimada': 'Consultar Receita Federal',  # Placeholder
-                'capital_social': data.get('capital_social', '0'),
-                'socios': qsa_count
-            }
-            return info
-        else:
-            # Se ReceitaWS falhar, retorna info básica
-            return {
-                'cnpj_raiz': cnpj_raiz,
-                'razao_social': 'N/D',
-                'tipo': 'N/D',
-                'qtd_filiais_estimada': 'Não disponível',
-                'capital_social': '0',
-                'socios': 0
-            }
-            
-    except Exception as e:
-        return {
-            'cnpj_raiz': cnpj[:8] if len(cnpj) >= 8 else cnpj,
-            'razao_social': 'Erro na consulta',
-            'tipo': 'N/D',
-            'qtd_filiais_estimada': f'Erro: {str(e)}',
-            'capital_social': '0',
-            'socios': 0
-        }
 
 def processar_lista(lista_cnpjs):
     dados_finais = []
@@ -225,7 +252,7 @@ def processar_lista(lista_cnpjs):
                     "Faturamento_Min": fat_min,
                     "Faturamento_Max": fat_max
                 })
-            time.sleep(0.3)  # Evitar rate limit
+            time.sleep(0.3)
         except: 
             continue
         progresso.progress((i + 1) / len(lista_cnpjs))
@@ -367,10 +394,9 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     
     st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
 
-    # --- INTELIGÊNCIA DE MERCADO REFORMULADA ---
+    # --- INTELIGÊNCIA DE MERCADO ---
     st.divider()
     st.markdown("### 🔍 Inteligência de Mercado")
-    st.markdown("**Análise completa:** Estrutura corporativa + Notícias atuais")
     
     emp_sel = st.selectbox("🏭 Selecione a Empresa para Análise:", df["Empresa"].tolist())
     
@@ -406,156 +432,61 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             </div>
             """, unsafe_allow_html=True)
         
-        # Botão de Análise Completa
-        if st.button(f"🚀 BUSCAR INTELIGÊNCIA COMPLETA", use_container_width=True, type="primary"):
+        # Botão Expansível para Análise Completa
+        if 'mostrar_inteligencia' not in st.session_state:
+            st.session_state.mostrar_inteligencia = {}
+        
+        if emp_sel not in st.session_state.mostrar_inteligencia:
+            st.session_state.mostrar_inteligencia[emp_sel] = False
+        
+        if st.button(
+            f"{'🔽 RECOLHER ANÁLISE' if st.session_state.mostrar_inteligencia[emp_sel] else '🔍 BUSCAR INTELIGÊNCIA COMPLETA'}", 
+            use_container_width=True, 
+            type="primary",
+            key=f"btn_intel_{emp_sel}"
+        ):
+            st.session_state.mostrar_inteligencia[emp_sel] = not st.session_state.mostrar_inteligencia[emp_sel]
+        
+        # Conteúdo Expansível
+        if st.session_state.mostrar_inteligencia[emp_sel]:
             
-            # SEÇÃO 1: ESTRUTURA CORPORATIVA (FILIAIS)
+            # Informação sobre filiais
             st.markdown("---")
-            st.markdown("### 🏢 Estrutura Corporativa - Matriz e Filiais")
+            cnpj_raiz = row['CNPJ'][:8]
+            st.markdown(f"""
+            <div class="info-box">
+                <strong>🏢 Estrutura Corporativa</strong><br><br>
+                <strong>📋 CNPJ Raiz:</strong> {cnpj_raiz}<br>
+                <strong>🏭 Tipo do Estabelecimento:</strong> {row['Tipo']}<br>
+                <strong>📍 Endereço:</strong> {row['Endereço']}<br><br>
+                <strong>💡 Outras Unidades:</strong> Para verificar se existem filiais ou outras unidades (sede/filiais) pelo Brasil, 
+                consulte o portal da Receita Federal usando o CNPJ raiz <strong>{cnpj_raiz}</strong> ou utilize serviços como 
+                Serasa, Boa Vista SCPC, ou APIs especializadas (Serpro, ReceitaWS Premium).
+            </div>
+            """, unsafe_allow_html=True)
             
-            with st.spinner("📊 Consultando estrutura da empresa..."):
-                info_filiais = buscar_quantidade_filiais(row['CNPJ'])
-                cnpj_raiz = row['CNPJ'][:8]
-                
-                col_fil1, col_fil2 = st.columns(2)
-                
-                with col_fil1:
-                    st.markdown(f"""
-                    <div class="destaque-box">
-                        <div style="font-size: 1.3em;">🔢 CNPJ RAIZ</div>
-                        <div class="destaque-numero">{cnpj_raiz}</div>
-                        <div style="font-size: 0.9em; margin-top: 10px;">Use este número para buscar todas as unidades</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col_fil2:
-                    st.markdown(f"""
-                    <div class="destaque-box" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                        <div style="font-size: 1.3em;">🏭 TIPO DE ESTABELECIMENTO</div>
-                        <div class="destaque-numero">{row['Tipo']}</div>
-                        <div style="font-size: 0.9em; margin-top: 10px;">Classificação do CNPJ consultado</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                st.markdown(f"""
-                <div class="info-box">
-                    <strong>💡 Como encontrar TODAS as filiais:</strong><br><br>
-                    1️⃣ Acesse: <a href="https://solucoes.receita.fazenda.gov.br/servicos/cnpjreva/cnpjreva_solicitacao.asp" target="_blank">Portal da Receita Federal</a><br>
-                    2️⃣ Busque por CNPJs que começam com: <strong>{cnpj_raiz}</strong><br>
-                    3️⃣ Ou use serviços pagos como Serasa, Boa Vista, ou API da Serpro<br><br>
-                    <strong>📍 Endereço desta unidade:</strong> {row['Endereço']}<br>
-                    <strong>🏭 Setor de Atuação:</strong> {row['Atividade Principal']}
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # SEÇÃO 2: NOTÍCIAS ATUAIS
+            # NOTÍCIAS DA EMPRESA
             st.markdown("---")
-            st.markdown("### 📰 Notícias e Informações Atuais")
+            st.markdown("### 📰 Notícias e Informações Atuais da Empresa")
             
-            with st.spinner("🔍 Buscando notícias recentes da empresa..."):
+            with st.spinner(f"🔍 Buscando notícias sobre {row['Razão Social']}..."):
+                noticias_empresa = buscar_noticias_newsapi(row['Razão Social'], tipo_busca="empresa")
                 
-                # Aqui você deve implementar a busca real via API
-                # Exemplo de estrutura de resposta esperada
-                
-                st.markdown(f"""
-                <div class="alerta-box">
-                    <strong>🔎 Buscando notícias sobre:</strong> {row['Razão Social']}<br>
-                    <strong>📅 Período:</strong> Últimos 6 meses<br>
-                    <strong>🌐 Fontes:</strong> Google News, portais setoriais, imprensa especializada
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # SIMULAÇÃO DE NOTÍCIAS (substituir por busca real)
-                # Use Google News API, NewsAPI, ou scraping
-                
-                noticias_encontradas = [
-                    {
-                        "titulo": f"Aguardando integração com API de notícias",
-                        "conteudo": f"Para ver notícias reais sobre {row['Razão Social']}, integre com Google News API, NewsAPI.org ou similar. O sistema está pronto para receber e exibir as notícias assim que a API for configurada.",
-                        "fonte": "Sistema BDR Hunter",
-                        "data": "Hoje",
-                        "categoria": "info",
-                        "relevancia": "alta"
-                    }
-                ]
-                
-                # Links de busca manual enquanto a API não está integrada
-                st.markdown("#### 🔗 Busca Manual de Notícias (Temporário)")
-                
-                col_news1, col_news2, col_news3 = st.columns(3)
-                
-                nome_busca = row['Razão Social'].replace(' ', '+')
-                
-                with col_news1:
-                    st.markdown(f"""
-                    **Notícias Gerais:**
-                    - [Google News - Geral](https://www.google.com/search?q={nome_busca}&tbm=nws)
-                    - [Google News - Últimos 30 dias](https://www.google.com/search?q={nome_busca}&tbm=nws&tbs=qdr:m)
-                    """)
-                
-                with col_news2:
-                    st.markdown(f"""
-                    **Expansão e Investimentos:**
-                    - [Expansão/Fábricas](https://www.google.com/search?q={nome_busca}+expansão+OR+fábrica+OR+investimento&tbm=nws)
-                    - [Novos Projetos](https://www.google.com/search?q={nome_busca}+projeto+OR+inauguração&tbm=nws)
-                    """)
-                
-                with col_news3:
-                    st.markdown(f"""
-                    **Dados Corporativos:**
-                    - [Resultados Financeiros](https://www.google.com/search?q={nome_busca}+balanço+OR+resultado&tbm=nws)
-                    - [Unidades/Filiais](https://www.google.com/search?q={nome_busca}+filiais+OR+unidades)
-                    """)
-                
-                # Exibir notícias formatadas
-                st.markdown("#### 📋 Notícias Encontradas")
-                
-                for idx, noticia in enumerate(noticias_encontradas, 1):
-                    
-                    # Definir cores por categoria
-                    if noticia["categoria"] == "expansao":
-                        cor_borda = "#28a745"
-                        icone = "🏭"
-                    elif noticia["categoria"] == "investimento":
-                        cor_borda = "#007bff"
-                        icone = "💰"
-                    elif noticia["categoria"] == "crise":
-                        cor_borda = "#dc3545"
-                        icone = "⚠️"
-                    elif noticia["categoria"] == "mercado":
-                        cor_borda = "#6f42c1"
-                        icone = "📊"
-                    else:
-                        cor_borda = "#667eea"
-                        icone = "📌"
-                    
-                    st.markdown(f"""
-                    <div class="noticia-box" style="border-left: 5px solid {cor_borda};">
-                        <div class="noticia-titulo">{icone} {noticia['titulo']}</div>
-                        <p class="noticia-conteudo">{noticia['conteudo']}</p>
-                        <div class="noticia-fonte">
-                            📰 {noticia['fonte']} | 📅 {noticia['data']} | 
-                            🎯 Relevância: <strong>{noticia['relevancia'].upper()}</strong>
+                if noticias_empresa:
+                    for noticia in noticias_empresa:
+                        st.markdown(f"""
+                        <div class="noticia-box" style="border-left: 5px solid {noticia['cor']};">
+                            <div class="noticia-titulo">{noticia['icone']} {noticia['titulo']}</div>
+                            <p class="noticia-conteudo">{noticia['conteudo']}</p>
+                            <div class="noticia-fonte">
+                                📰 {noticia['fonte']} | 📅 {noticia['data']}
+                            </div>
                         </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # Instruções para integração
-                st.markdown("---")
-                st.info("""
-                **💡 Para ativar busca automática de notícias:**
-                
-                1. Cadastre-se em uma API de notícias:
-                   - NewsAPI.org (gratuito até 100 req/dia)
-                   - Google News API
-                   - Bing News Search API
-                
-                2. Adicione sua chave API no código
-                
-                3. As notícias aparecerão automaticamente aqui
-                """)
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("ℹ️ Nenhuma notícia recente encontrada sobre esta empresa nos últimos 6 meses.")
             
-            # SEÇÃO 3: CONTEXTO SETORIAL
+            # ANÁLISE DO SETOR
             st.markdown("---")
             st.markdown("### 📊 Análise do Setor")
             
@@ -568,9 +499,26 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             </div>
             """, unsafe_allow_html=True)
             
-            # Links setoriais
-            setor_busca = row['Atividade Principal'][:40].replace(' ', '+')
-            st.markdown(f"🔍 [Tendências do Setor no Google](https://www.google.com/search?q={setor_busca}+mercado+brasil+2024+2025&tbm=nws)")
+            st.markdown("#### 📈 Notícias do Setor")
+            
+            with st.spinner(f"🔍 Buscando tendências do setor..."):
+                # Extrai palavra-chave do setor
+                setor = row['Atividade Principal'].split('-')[0].strip() if '-' in row['Atividade Principal'] else row['Atividade Principal'][:50]
+                noticias_setor = buscar_noticias_newsapi(setor, tipo_busca="setor")
+                
+                if noticias_setor:
+                    for noticia in noticias_setor:
+                        st.markdown(f"""
+                        <div class="noticia-box" style="border-left: 5px solid {noticia['cor']};">
+                            <div class="noticia-titulo">{noticia['icone']} {noticia['titulo']}</div>
+                            <p class="noticia-conteudo">{noticia['conteudo']}</p>
+                            <div class="noticia-fonte">
+                                📰 {noticia['fonte']} | 📅 {noticia['data']}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("ℹ️ Nenhuma notícia recente encontrada sobre este setor.")
 
     # MAPA
     st.divider()
@@ -582,4 +530,4 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
 st.markdown("---")
-st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson Vallim | Inteligência estratégica para prospecção B2B")
+st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson96 | Inteligência estratégica para prospecção B2B")
