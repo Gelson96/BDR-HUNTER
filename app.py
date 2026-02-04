@@ -9,7 +9,10 @@ import time
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
 
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
-GEMINI_API_KEY = "AIzaSyBpzFNt13y2t1AB8aSXQAfyoWVpOvLbvFw"
+
+# IMPORTANTE: Use st.secrets para produção
+# Crie arquivo .streamlit/secrets.toml com: GEMINI_API_KEY = "sua_chave"
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyBpzFNt13y2t1AB8aSXQAfyoWVpOvLbvFw")
 
 # --- CSS ---
 st.markdown(
@@ -31,35 +34,32 @@ st.markdown(
         font-weight: bold;
         margin: 10px 0;
     }}
-    .noticia-box {{
+    .noticias-conteudo {{
         background: #ffffff;
         border: 1px solid #e0e0e0;
-        border-left: 5px solid #667eea;
-        padding: 20px;
-        margin: 15px 0;
+        padding: 25px;
+        margin: 20px 0;
         border-radius: 8px;
         box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }}
-    .noticia-titulo {{
-        font-weight: bold;
-        color: #1a1a1a;
-        margin-bottom: 12px;
-        font-size: 1.2em;
-        line-height: 1.5;
-    }}
-    .noticia-conteudo {{
-        color: #444;
         line-height: 1.8;
-        margin: 12px 0;
         font-size: 0.98em;
+        color: #333;
     }}
-    .noticia-fonte {{
-        font-size: 0.85em;
-        color: #888;
-        margin-top: 12px;
-        padding-top: 10px;
-        border-top: 1px solid #f0f0f0;
-        font-style: italic;
+    .noticias-conteudo h4 {{
+        color: #667eea;
+        margin-top: 20px;
+        margin-bottom: 12px;
+        font-size: 1.1em;
+    }}
+    .noticias-conteudo ul {{
+        margin-left: 20px;
+        margin-bottom: 15px;
+    }}
+    .noticias-conteudo li {{
+        margin-bottom: 8px;
+    }}
+    .noticias-conteudo strong {{
+        color: #1a1a1a;
     }}
     .alerta-box {{
         background: #fff3cd;
@@ -100,50 +100,61 @@ def limpar_nome_empresa(nome):
     return re.sub(r'\s+', ' ', nome_limpo).strip()
 
 def buscar_noticias_gemini(empresa_nome):
-    """Busca notícias detalhadas usando Google Gemini API"""
+    """Busca notícias usando Google Gemini API v1 (CORRIGIDO)"""
     try:
         nome_limpo = limpar_nome_empresa(empresa_nome)
         
         prompt = f"""
-Busque notícias RECENTES E RELEVANTES sobre a empresa "{empresa_nome}".
+Você é um analista de mercado especializado em prospecção comercial B2B.
 
-Foque especificamente em:
-1. Expansão de fábricas, novas unidades ou plantas industriais
-2. Investimentos significativos ou aportes de capital
-3. Aquisições, fusões ou parcerias estratégicas
-4. Lançamento de novos produtos ou linhas de produção
-5. Resultados financeiros e balanços divulgados
-6. Mudanças na diretoria ou estrutura societária
-7. Prêmios, certificações ou reconhecimentos
-8. Crises, fechamentos ou recuperação judicial
-9. Contratações em massa ou demissões
-10. Inaugurações ou eventos corporativos importantes
+Busque e organize notícias RECENTES e RELEVANTES sobre a empresa "{empresa_nome}" (também conhecida como "{nome_limpo}").
 
-Para cada notícia encontrada, retorne em formato JSON (SEM markdown, SEM ```json, apenas o JSON puro):
+Formato da resposta:
+Notícias Recentes: Aqui estão os destaques mais relevantes de [ano atual] e o que esperar:
 
-{{"noticias": [
-  {{
-    "titulo": "título completo e descritivo da notícia",
-    "conteudo": "descrição detalhada em 3-5 frases explicando o contexto, impacto e relevância para negócios",
-    "fonte": "nome do veículo ou site",
-    "data": "mês/ano ou período aproximado",
-    "categoria": "expansao ou investimento ou crise ou financeiro ou geral",
-    "relevancia": "alta ou média ou baixa"
-  }}
-]}}
+1. [Categoria Principal 1]
+[Descrição em 2-3 linhas do contexto e impacto]
+* [Detalhe específico 1]
+* [Detalhe específico 2]
+* [Detalhe específico 3]
+
+2. [Categoria Principal 2]
+[Descrição em 2-3 linhas do contexto e impacto]
+* [Detalhe específico 1]
+* [Detalhe específico 2]
+
+3. [Categoria Principal 3]
+[Descrição em 2-3 linhas]
+* [Detalhe específico 1]
+* [Detalhe específico 2]
+
+4. [Categoria Principal 4]
+[Descrição e detalhes]
+
+Categorias sugeridas (adapte conforme a empresa):
+- Aquisições Estratégicas
+- Expansão Física e Varejo
+- Lançamentos e Produtos
+- Resultados Financeiros
+- Investimentos e Fábricas
+- Parcerias e Joint Ventures
+- Mudanças Estratégicas
 
 IMPORTANTE:
-- Retorne ATÉ 8 notícias mais relevantes
-- Priorize notícias dos últimos 2 anos
-- Se não encontrar notícias, retorne: {{"noticias": []}}
-- NÃO invente informações - apenas notícias verificáveis
-- Seja específico sobre valores, datas e locais quando disponível
+- Use linguagem profissional e direta
+- Inclua números, valores e datas quando disponível
+- Foque em informações úteis para prospecção comercial
+- Máximo 5-6 categorias
+- Se não encontrar notícias recentes, informe claramente
+- NÃO invente dados - apenas informações verificáveis
 """
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # URL CORRIGIDA: v1 ao invés de v1beta (conforme print)
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
         headers = {'Content-Type': 'application/json'}
         
+        # PAYLOAD CORRIGIDO: com response_mime_type
         payload = {
             "contents": [{
                 "parts": [{"text": prompt}]
@@ -153,6 +164,7 @@ IMPORTANTE:
                 "topK": 40,
                 "topP": 0.95,
                 "maxOutputTokens": 4096,
+                "response_mime_type": "text/plain"  # Adicionado conforme print
             }
         }
         
@@ -163,136 +175,23 @@ IMPORTANTE:
             
             try:
                 texto_resposta = data['candidates'][0]['content']['parts'][0]['text']
-                texto_resposta = texto_resposta.strip()
+                return texto_resposta.strip()
                 
-                # Remove markdown se presente
-                if '```json' in texto_resposta:
-                    texto_resposta = texto_resposta.split('```json')[1].split('```')[0].strip()
-                elif '```' in texto_resposta:
-                    texto_resposta = texto_resposta.split('```')[1].split('```')[0].strip()
-                
-                import json
-                resultado = json.loads(texto_resposta)
-                
-                noticias_formatadas = []
-                
-                for noticia in resultado.get('noticias', []):
-                    categoria = noticia.get('categoria', 'geral').lower()
-                    
-                    # Define ícone e cor por categoria
-                    if categoria == "expansao":
-                        icone = "🏭"
-                        cor = "#28a745"
-                    elif categoria == "investimento":
-                        icone = "💰"
-                        cor = "#007bff"
-                    elif categoria == "crise":
-                        icone = "⚠️"
-                        cor = "#dc3545"
-                    elif categoria == "financeiro":
-                        icone = "📊"
-                        cor = "#6f42c1"
-                    else:
-                        icone = "📰"
-                        cor = "#667eea"
-                    
-                    noticias_formatadas.append({
-                        'titulo': noticia.get('titulo', 'Sem título'),
-                        'conteudo': noticia.get('conteudo', 'Sem descrição'),
-                        'fonte': noticia.get('fonte', 'Fonte não identificada'),
-                        'data': noticia.get('data', 'Data não disponível'),
-                        'categoria': categoria,
-                        'relevancia': noticia.get('relevancia', 'média'),
-                        'icone': icone,
-                        'cor': cor
-                    })
-                
-                return noticias_formatadas
-                
-            except (json.JSONDecodeError, KeyError, IndexError) as e:
-                st.error(f"❌ Erro ao processar resposta da API: {str(e)}")
-                return []
+            except (KeyError, IndexError) as e:
+                st.error(f"❌ Erro ao processar resposta: {str(e)}")
+                return None
         else:
             st.error(f"❌ Erro na API Gemini (código {response.status_code})")
-            return []
+            with st.expander("🔍 Ver detalhes do erro"):
+                st.code(response.text)
+            return None
             
     except Exception as e:
         st.error(f"❌ Erro ao buscar notícias: {str(e)}")
-        return []
-
-def buscar_noticias_setor(atividade):
-    """Busca notícias sobre o setor de atuação"""
-    try:
-        # Extrai palavras-chave da atividade
-        palavras_chave = atividade[:50]
-        
-        prompt = f"""
-Busque notícias e tendências RECENTES do setor: "{palavras_chave}".
-
-Foque em:
-- Tendências de mercado e inovações
-- Regulamentações ou mudanças legais
-- Crescimento ou retração do setor
-- Principais desafios e oportunidades
-- Novas tecnologias ou processos
-
-Retorne JSON puro (sem markdown):
-
-{{"noticias": [
-  {{
-    "titulo": "título da notícia setorial",
-    "conteudo": "descrição em 2-3 frases",
-    "fonte": "fonte",
-    "data": "período",
-    "relevancia": "alta ou média"
-  }}
-]}}
-
-Máximo 4 notícias. Se não encontrar: {{"noticias": []}}
-"""
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.4,
-                "maxOutputTokens": 2048,
-            }
-        }
-        
-        response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            texto_resposta = data['candidates'][0]['content']['parts'][0]['text'].strip()
-            
-            if '```json' in texto_resposta:
-                texto_resposta = texto_resposta.split('```json')[1].split('```')[0].strip()
-            elif '```' in texto_resposta:
-                texto_resposta = texto_resposta.split('```')[1].split('```')[0].strip()
-            
-            import json
-            resultado = json.loads(texto_resposta)
-            
-            noticias = []
-            for n in resultado.get('noticias', []):
-                noticias.append({
-                    'titulo': n.get('titulo', ''),
-                    'conteudo': n.get('conteudo', ''),
-                    'fonte': n.get('fonte', ''),
-                    'data': n.get('data', ''),
-                    'relevancia': n.get('relevancia', 'média'),
-                    'icone': '📊',
-                    'cor': '#6f42c1'
-                })
-            
-            return noticias
-        
-        return []
-        
-    except:
-        return []
+        import traceback
+        with st.expander("🔍 Ver detalhes técnicos"):
+            st.code(traceback.format_exc())
+        return None
 
 def processar_inteligencia_premium(d):
     porte_cod = d.get('porte')
@@ -499,7 +398,7 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     
     st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
 
-    # --- INTELIGÊNCIA DE MERCADO (AUTOMÁTICA) ---
+    # --- INTELIGÊNCIA DE MERCADO ---
     st.divider()
     st.markdown("### 🔍 Inteligência de Mercado")
     
@@ -551,28 +450,26 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         </div>
         """, unsafe_allow_html=True)
         
-        # NOTÍCIAS DA EMPRESA (AUTOMÁTICO)
+        # NOTÍCIAS (FORMATO SIMPLES SEM TÍTULO)
         st.markdown("---")
-        st.markdown("### 📰 Notícias e Informações Atuais da Empresa")
         
         with st.spinner(f"🔍 Buscando notícias sobre {row['Razão Social']}..."):
-            noticias_empresa = buscar_noticias_gemini(row['Razão Social'])
+            noticias_texto = buscar_noticias_gemini(row['Razão Social'])
             
-            if noticias_empresa:
-                for idx, noticia in enumerate(noticias_empresa, 1):
-                    st.markdown(f"""
-                    <div class="noticia-box" style="border-left: 5px solid {noticia['cor']};">
-                        <div class="noticia-titulo">{noticia['icone']} {noticia['titulo']}</div>
-                        <p class="noticia-conteudo">{noticia['conteudo']}</p>
-                        <div class="noticia-fonte">
-                            📰 <strong>{noticia['fonte']}</strong> | 📅 {noticia['data']} | 🎯 Relevância: {noticia['relevancia'].upper()}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+            if noticias_texto:
+                # Converte Markdown para HTML simples
+                import markdown
+                noticias_html = markdown.markdown(noticias_texto)
+                
+                st.markdown(f"""
+                <div class="noticias-conteudo">
+                    {noticias_html}
+                </div>
+                """, unsafe_allow_html=True)
             else:
                 st.info("ℹ️ Nenhuma notícia recente encontrada sobre esta empresa.")
         
-        # ANÁLISE DO SETOR (AUTOMÁTICO)
+        # Análise do Setor
         st.markdown("---")
         st.markdown("### 📊 Análise do Setor")
         
@@ -584,22 +481,6 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             <strong>💼 Capital Social Declarado:</strong> {row['Capital Social']}
         </div>
         """, unsafe_allow_html=True)
-        
-        with st.spinner("📊 Buscando tendências do setor..."):
-            noticias_setor = buscar_noticias_setor(row['Atividade Principal'])
-            
-            if noticias_setor:
-                st.markdown("#### 📈 Notícias do Setor")
-                for noticia in noticias_setor:
-                    st.markdown(f"""
-                    <div class="noticia-box" style="border-left: 5px solid {noticia['cor']};">
-                        <div class="noticia-titulo">{noticia['icone']} {noticia['titulo']}</div>
-                        <p class="noticia-conteudo">{noticia['conteudo']}</p>
-                        <div class="noticia-fonte">
-                            📰 {noticia['fonte']} | 📅 {noticia['data']}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
 
     # MAPA
     st.divider()
