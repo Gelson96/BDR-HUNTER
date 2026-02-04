@@ -2,17 +2,42 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-from datetime import datetime, timedelta
 import time
+
+# SDK OFICIAL DO GOOGLE GEMINI
+try:
+    import google.generativeai as genai
+    GEMINI_DISPONIVEL = True
+except ImportError:
+    GEMINI_DISPONIVEL = False
+    st.error("⚠️ Instale: pip install google-generativeai")
 
 # 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
 
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
 
-# IMPORTANTE: Use st.secrets para produção
-# Crie arquivo .streamlit/secrets.toml com: GEMINI_API_KEY = "sua_chave"
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "AIzaSyBpzFNt13y2t1AB8aSXQAfyoWVpOvLbvFw")
+# CONFIGURAÇÃO SEGURA DA API KEY
+# Criar arquivo .streamlit/secrets.toml com:
+# GEMINI_API_KEY = "sua_chave_aqui"
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    if GEMINI_DISPONIVEL:
+        genai.configure(api_key=GEMINI_API_KEY)
+except Exception as e:
+    st.error(f"""
+    ⚠️ **ERRO DE CONFIGURAÇÃO**
+    
+    A chave da API Gemini não foi encontrada.
+    
+    **Como corrigir:**
+    1. Crie o arquivo: `.streamlit/secrets.toml`
+    2. Adicione: `GEMINI_API_KEY = "sua_chave_aqui"`
+    3. Obtenha sua chave em: https://aistudio.google.com/app/apikey
+    
+    **Erro técnico:** {str(e)}
+    """)
+    GEMINI_DISPONIVEL = False
 
 # --- CSS ---
 st.markdown(
@@ -82,6 +107,13 @@ st.markdown(
         margin: 10px 0;
         border-radius: 5px;
     }}
+    .erro-box {{
+        background: #f8d7da;
+        border-left: 4px solid #dc3545;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }}
     </style>
     <div class="centered-container"><img src="{URL_LOGO}"></div>
     """,
@@ -100,7 +132,13 @@ def limpar_nome_empresa(nome):
     return re.sub(r'\s+', ' ', nome_limpo).strip()
 
 def buscar_noticias_gemini(empresa_nome):
-    """Busca notícias usando Google Gemini API v1 (CORRIGIDO)"""
+    """
+    Busca notícias usando SDK OFICIAL do Google Gemini
+    Requer: pip install google-generativeai
+    """
+    if not GEMINI_DISPONIVEL:
+        return None
+    
     try:
         nome_limpo = limpar_nome_empresa(empresa_nome)
         
@@ -114,83 +152,81 @@ Notícias Recentes: Aqui estão os destaques mais relevantes de [ano atual] e o 
 
 1. [Categoria Principal 1]
 [Descrição em 2-3 linhas do contexto e impacto]
-* [Detalhe específico 1]
-* [Detalhe específico 2]
+* [Detalhe específico 1 com dados, valores ou datas]
+* [Detalhe específico 2 com informações concretas]
 * [Detalhe específico 3]
 
 2. [Categoria Principal 2]
-[Descrição em 2-3 linhas do contexto e impacto]
-* [Detalhe específico 1]
-* [Detalhe específico 2]
-
-3. [Categoria Principal 3]
 [Descrição em 2-3 linhas]
 * [Detalhe específico 1]
 * [Detalhe específico 2]
 
+3. [Categoria Principal 3]
+[Descrição e contexto]
+* [Detalhe 1]
+* [Detalhe 2]
+
 4. [Categoria Principal 4]
-[Descrição e detalhes]
+[Descrição]
 
-Categorias sugeridas (adapte conforme a empresa):
+Categorias sugeridas (adapte conforme encontrar):
 - Aquisições Estratégicas
-- Expansão Física e Varejo
+- Expansão Física e Varejo / Novas Fábricas
 - Lançamentos e Produtos
-- Resultados Financeiros
-- Investimentos e Fábricas
-- Parcerias e Joint Ventures
-- Mudanças Estratégicas
+- Resultados Financeiros / Faturamento
+- Investimentos e Infraestrutura
+- Parcerias Estratégicas
+- Mudanças na Gestão
 
-IMPORTANTE:
-- Use linguagem profissional e direta
-- Inclua números, valores e datas quando disponível
-- Foque em informações úteis para prospecção comercial
-- Máximo 5-6 categorias
-- Se não encontrar notícias recentes, informe claramente
-- NÃO invente dados - apenas informações verificáveis
+DIRETRIZES:
+- Use linguagem profissional e objetiva
+- Inclua números, valores R$, datas específicas quando disponível
+- Foque em informações úteis para decisão comercial B2B
+- Máximo 5-6 categorias principais
+- Se não encontrar notícias recentes, informe: "Não foram encontradas notícias públicas recentes sobre esta empresa. Recomenda-se consulta direta ou verificação em bases especializadas."
+- NÃO invente dados - apenas informações verificáveis de fontes públicas
+- Priorize notícias dos últimos 2 anos (2024-2025)
 """
         
-        # URL CORRIGIDA: v1 ao invés de v1beta (conforme print)
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # USA O SDK OFICIAL - FORMA CORRETA
+        model = genai.GenerativeModel("gemini-1.5-flash")
         
-        headers = {'Content-Type': 'application/json'}
+        # Configurações de geração
+        generation_config = genai.types.GenerationConfig(
+            temperature=0.4,
+            top_k=40,
+            top_p=0.95,
+            max_output_tokens=4096,
+        )
         
-        # PAYLOAD CORRIGIDO: com response_mime_type
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.4,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 4096,
-                "response_mime_type": "text/plain"  # Adicionado conforme print
-            }
-        }
+        # Gera o conteúdo
+        response = model.generate_content(
+            prompt,
+            generation_config=generation_config
+        )
         
-        response = requests.post(url, json=payload, headers=headers, timeout=45)
+        return response.text
         
-        if response.status_code == 200:
-            data = response.json()
-            
-            try:
-                texto_resposta = data['candidates'][0]['content']['parts'][0]['text']
-                return texto_resposta.strip()
-                
-            except (KeyError, IndexError) as e:
-                st.error(f"❌ Erro ao processar resposta: {str(e)}")
-                return None
-        else:
-            st.error(f"❌ Erro na API Gemini (código {response.status_code})")
-            with st.expander("🔍 Ver detalhes do erro"):
-                st.code(response.text)
-            return None
-            
     except Exception as e:
         st.error(f"❌ Erro ao buscar notícias: {str(e)}")
-        import traceback
-        with st.expander("🔍 Ver detalhes técnicos"):
-            st.code(traceback.format_exc())
+        
+        # Diagnóstico detalhado
+        with st.expander("🔍 Detalhes do Erro"):
+            st.code(f"""
+Tipo do erro: {type(e).__name__}
+Mensagem: {str(e)}
+
+Possíveis causas:
+1. API Key inválida ou expirada
+2. Quota excedida (free tier tem limites)
+3. Modelo indisponível temporariamente
+4. Problema de rede/conectividade
+
+Como resolver:
+- Verifique sua chave em: https://aistudio.google.com/app/apikey
+- Confirme que há quota disponível
+- Teste com: pip install google-generativeai && python -c "import google.generativeai as genai; print('OK')"
+""")
         return None
 
 def processar_inteligencia_premium(d):
@@ -450,24 +486,40 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         </div>
         """, unsafe_allow_html=True)
         
-        # NOTÍCIAS (FORMATO SIMPLES SEM TÍTULO)
+        # NOTÍCIAS (SDK OFICIAL)
         st.markdown("---")
         
-        with st.spinner(f"🔍 Buscando notícias sobre {row['Razão Social']}..."):
-            noticias_texto = buscar_noticias_gemini(row['Razão Social'])
-            
-            if noticias_texto:
-                # Converte Markdown para HTML simples
-                import markdown
-                noticias_html = markdown.markdown(noticias_texto)
+        if not GEMINI_DISPONIVEL:
+            st.markdown("""
+            <div class="erro-box">
+                <strong>⚠️ API Gemini não configurada</strong><br><br>
+                Para ativar a busca automática de notícias:<br>
+                1. Instale: <code>pip install google-generativeai</code><br>
+                2. Crie o arquivo: <code>.streamlit/secrets.toml</code><br>
+                3. Adicione: <code>GEMINI_API_KEY = "sua_chave"</code><br>
+                4. Obtenha a chave em: <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            with st.spinner(f"🔍 Buscando notícias sobre {row['Razão Social']}..."):
+                noticias_texto = buscar_noticias_gemini(row['Razão Social'])
                 
-                st.markdown(f"""
-                <div class="noticias-conteudo">
-                    {noticias_html}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.info("ℹ️ Nenhuma notícia recente encontrada sobre esta empresa.")
+                if noticias_texto:
+                    # Converte markdown para HTML
+                    try:
+                        import markdown
+                        noticias_html = markdown.markdown(noticias_texto)
+                    except:
+                        # Fallback se markdown não estiver instalado
+                        noticias_html = noticias_texto.replace('\n', '<br>')
+                    
+                    st.markdown(f"""
+                    <div class="noticias-conteudo">
+                        {noticias_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("ℹ️ Não foi possível buscar notícias no momento.")
         
         # Análise do Setor
         st.markdown("---")
