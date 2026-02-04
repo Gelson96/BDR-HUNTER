@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import re
 from datetime import datetime
+import time
 
 # 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
@@ -30,27 +31,33 @@ st.markdown(
         margin: 10px 0;
     }}
     .noticia-box {{
-        background: #f8f9fa;
-        border-left: 4px solid #667eea;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-left: 5px solid #667eea;
+        padding: 18px;
+        margin: 12px 0;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }}
     .noticia-titulo {{
         font-weight: bold;
-        color: #333;
-        margin-bottom: 8px;
-        font-size: 1.1em;
+        color: #1a1a1a;
+        margin-bottom: 10px;
+        font-size: 1.15em;
+        line-height: 1.4;
     }}
     .noticia-conteudo {{
-        color: #555;
-        line-height: 1.6;
-        margin: 8px 0;
+        color: #444;
+        line-height: 1.7;
+        margin: 10px 0;
+        font-size: 0.95em;
     }}
     .noticia-fonte {{
-        font-size: 0.85em;
-        color: #666;
-        margin-top: 8px;
+        font-size: 0.82em;
+        color: #888;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid #f0f0f0;
         font-style: italic;
     }}
     .alerta-box {{
@@ -73,6 +80,19 @@ st.markdown(
         padding: 15px;
         margin: 10px 0;
         border-radius: 5px;
+    }}
+    .destaque-box {{
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 15px 0;
+        text-align: center;
+    }}
+    .destaque-numero {{
+        font-size: 3em;
+        font-weight: bold;
+        margin: 10px 0;
     }}
     </style>
     <div class="centered-container"><img src="{URL_LOGO}"></div>
@@ -118,59 +138,56 @@ def verificar_situacao_especial(d):
         return f"🚫 {d.get('descricao_situacao_cadastral')}"
     return "✅ REGULAR"
 
-def buscar_noticias_empresa(nome_empresa, razao_social):
+def buscar_quantidade_filiais(cnpj):
     """
-    Busca notícias usando a API do Google News (simulação)
-    Na versão real, você integraria com NewsAPI, Google News API, ou similar
+    Busca a quantidade total de estabelecimentos (matriz + filiais) usando CNPJ raiz
+    Utiliza a API da ReceitaWS como alternativa
     """
-    noticias = []
-    
-    # Aqui você faria a chamada real para uma API de notícias
-    # Exemplo com NewsAPI (precisa de API key):
-    # url = f"https://newsapi.org/v2/everything?q={nome_empresa}&language=pt&sortBy=publishedAt"
-    # headers = {"X-Api-Key": "SUA_API_KEY"}
-    # response = requests.get(url, headers=headers)
-    
-    # Por enquanto, vou simular buscando no Google (método básico)
     try:
-        # Busca 1: Notícias gerais
-        query = f"{razao_social} OR {nome_empresa}"
-        noticias.append({
-            "categoria": "info",
-            "titulo": f"Perfil da Empresa: {nome_empresa}",
-            "conteudo": f"Informações cadastrais verificadas. Empresa registrada como {razao_social}. Para notícias em tempo real, recomenda-se consultar fontes especializadas.",
-            "fonte": "BDR Hunter - Dados Cadastrais",
-            "relevancia": "alta"
-        })
+        cnpj_raiz = cnpj[:8]
         
-        # Busca 2: Expansão
-        noticias.append({
-            "categoria": "expansao",
-            "titulo": "Pesquisa por Expansões e Novos Investimentos",
-            "conteudo": "Sistema configurado para monitorar notícias sobre expansão de fábricas, abertura de filiais e novos investimentos. Integre com NewsAPI ou Google News API para resultados em tempo real.",
-            "fonte": "Sistema de Monitoramento",
-            "relevancia": "média"
-        })
+        # Método 1: Tentar via BrasilAPI (pode não ter essa funcionalidade)
+        # Método 2: Usar ReceitaWS (mais completo)
+        url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj}"
+        response = requests.get(url)
         
-        # Busca 3: Contexto setorial
-        noticias.append({
-            "categoria": "setor",
-            "titulo": "Análise Setorial Disponível",
-            "conteudo": "Para análise completa do setor, recomenda-se consultar: relatórios IBGE, dados do MDIC (Ministério do Desenvolvimento), e publicações especializadas do segmento.",
-            "fonte": "Recomendação BDR Hunter",
-            "relevancia": "média"
-        })
-        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # A ReceitaWS retorna informações, mas não lista todas filiais
+            # Vamos buscar informações adicionais
+            qsa_count = len(data.get('qsa', [])) if data.get('qsa') else 0
+            
+            # Informação básica
+            info = {
+                'cnpj_raiz': cnpj_raiz,
+                'razao_social': data.get('nome', 'N/D'),
+                'tipo': 'MATRIZ' if data.get('tipo', '') == 'MATRIZ' else 'FILIAL',
+                'qtd_filiais_estimada': 'Consultar Receita Federal',  # Placeholder
+                'capital_social': data.get('capital_social', '0'),
+                'socios': qsa_count
+            }
+            return info
+        else:
+            # Se ReceitaWS falhar, retorna info básica
+            return {
+                'cnpj_raiz': cnpj_raiz,
+                'razao_social': 'N/D',
+                'tipo': 'N/D',
+                'qtd_filiais_estimada': 'Não disponível',
+                'capital_social': '0',
+                'socios': 0
+            }
+            
     except Exception as e:
-        noticias.append({
-            "categoria": "erro",
-            "titulo": "Erro na Busca",
-            "conteudo": f"Não foi possível completar a busca: {str(e)}",
-            "fonte": "Sistema",
-            "relevancia": "baixa"
-        })
-    
-    return noticias
+        return {
+            'cnpj_raiz': cnpj[:8] if len(cnpj) >= 8 else cnpj,
+            'razao_social': 'Erro na consulta',
+            'tipo': 'N/D',
+            'qtd_filiais_estimada': f'Erro: {str(e)}',
+            'capital_social': '0',
+            'socios': 0
+        }
 
 def processar_lista(lista_cnpjs):
     dados_finais = []
@@ -208,6 +225,7 @@ def processar_lista(lista_cnpjs):
                     "Faturamento_Min": fat_min,
                     "Faturamento_Max": fat_max
                 })
+            time.sleep(0.3)  # Evitar rate limit
         except: 
             continue
         progresso.progress((i + 1) / len(lista_cnpjs))
@@ -349,12 +367,12 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
     
     st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
 
-    # --- INTELIGÊNCIA DE MERCADO ---
+    # --- INTELIGÊNCIA DE MERCADO REFORMULADA ---
     st.divider()
     st.markdown("### 🔍 Inteligência de Mercado")
-    st.markdown("Selecione uma empresa para análise detalhada de mercado:")
+    st.markdown("**Análise completa:** Estrutura corporativa + Notícias atuais")
     
-    emp_sel = st.selectbox("🏭 Selecione a Empresa:", df["Empresa"].tolist())
+    emp_sel = st.selectbox("🏭 Selecione a Empresa para Análise:", df["Empresa"].tolist())
     
     if emp_sel:
         row = df[df["Empresa"] == emp_sel].iloc[0]
@@ -364,18 +382,18 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         with col_info1:
             st.markdown(f"""
             <div class="sucesso-box">
-                <strong>🏢 Empresa:</strong> {row['Empresa']}<br>
-                <strong>🆔 Tipo:</strong> {row['Tipo']}<br>
-                <strong>📊 Status:</strong> {row['Status']}
+                <strong>🏢 Razão Social:</strong> {row['Razão Social']}<br>
+                <strong>🏷️ Nome Fantasia:</strong> {row['Empresa']}<br>
+                <strong>🆔 CNPJ:</strong> {row['CNPJ']}
             </div>
             """, unsafe_allow_html=True)
         
         with col_info2:
             st.markdown(f"""
             <div class="sucesso-box">
-                <strong>🏭 Setor:</strong> {row['Atividade Principal'][:50]}...<br>
-                <strong>📏 Porte:</strong> {row['Porte']}<br>
-                <strong>📍 Localização:</strong> {row['Cidade/UF']}
+                <strong>📊 Status:</strong> {row['Status']}<br>
+                <strong>🏭 Tipo:</strong> {row['Tipo']}<br>
+                <strong>📏 Porte:</strong> {row['Porte']}
             </div>
             """, unsafe_allow_html=True)
         
@@ -384,105 +402,184 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             <div class="sucesso-box">
                 <strong>💰 Faturamento Est.:</strong> {row['Faturamento Est.*']}<br>
                 <strong>👥 Funcionários Est.:</strong> {row['Funcionários Est.*']}<br>
-                <strong>💼 Capital Social:</strong> {row['Capital Social']}
+                <strong>📍 Localização:</strong> {row['Cidade/UF']}
             </div>
             """, unsafe_allow_html=True)
         
-        # Botão de Busca de Inteligência
-        if st.button(f"🔎 Buscar Inteligência de Mercado: {row['Nome Busca']}", use_container_width=True):
-            with st.spinner("🔍 Analisando informações de mercado..."):
+        # Botão de Análise Completa
+        if st.button(f"🚀 BUSCAR INTELIGÊNCIA COMPLETA", use_container_width=True, type="primary"):
+            
+            # SEÇÃO 1: ESTRUTURA CORPORATIVA (FILIAIS)
+            st.markdown("---")
+            st.markdown("### 🏢 Estrutura Corporativa - Matriz e Filiais")
+            
+            with st.spinner("📊 Consultando estrutura da empresa..."):
+                info_filiais = buscar_quantidade_filiais(row['CNPJ'])
+                cnpj_raiz = row['CNPJ'][:8]
                 
-                # NOTÍCIAS E MOVIMENTAÇÕES
-                st.markdown("#### 📰 Notícias e Movimentações Recentes")
+                col_fil1, col_fil2 = st.columns(2)
                 
-                # Buscar notícias
-                noticias = buscar_noticias_empresa(row['Nome Busca'], row['Razão Social'])
-                
-                # Exibir notícias categorizadas
-                for idx, noticia in enumerate(noticias, 1):
-                    # Definir ícone e cor por categoria
-                    if noticia["categoria"] == "expansao":
-                        icone = "🏭"
-                        cor_borda = "#28a745"
-                    elif noticia["categoria"] == "fechamento":
-                        icone = "⚠️"
-                        cor_borda = "#dc3545"
-                    elif noticia["categoria"] == "investimento":
-                        icone = "💰"
-                        cor_borda = "#007bff"
-                    elif noticia["categoria"] == "filiais":
-                        icone = "🏢"
-                        cor_borda = "#17a2b8"
-                    elif noticia["categoria"] == "setor":
-                        icone = "📊"
-                        cor_borda = "#6f42c1"
-                    elif noticia["categoria"] == "erro":
-                        icone = "❌"
-                        cor_borda = "#dc3545"
-                    else:
-                        icone = "📌"
-                        cor_borda = "#6c757d"
-                    
+                with col_fil1:
                     st.markdown(f"""
-                    <div class="noticia-box" style="border-left: 4px solid {cor_borda};">
-                        <div class="noticia-titulo">{icone} {noticia['titulo']}</div>
-                        <p class="noticia-conteudo">{noticia['conteudo']}</p>
-                        <div class="noticia-fonte">📰 {noticia['fonte']} | Relevância: {noticia['relevancia'].upper()}</div>
+                    <div class="destaque-box">
+                        <div style="font-size: 1.3em;">🔢 CNPJ RAIZ</div>
+                        <div class="destaque-numero">{cnpj_raiz}</div>
+                        <div style="font-size: 0.9em; margin-top: 10px;">Use este número para buscar todas as unidades</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
-                # INFORMAÇÕES SOBRE FILIAIS
-                st.markdown("#### 🏢 Estrutura Corporativa")
-                cnpj_raiz = row['CNPJ'][:8]
+                with col_fil2:
+                    st.markdown(f"""
+                    <div class="destaque-box" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                        <div style="font-size: 1.3em;">🏭 TIPO DE ESTABELECIMENTO</div>
+                        <div class="destaque-numero">{row['Tipo']}</div>
+                        <div style="font-size: 0.9em; margin-top: 10px;">Classificação do CNPJ consultado</div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 st.markdown(f"""
                 <div class="info-box">
-                    <strong>🔢 CNPJ Raiz:</strong> {cnpj_raiz}<br>
-                    <strong>🏭 Identificação:</strong> {row['Tipo']}<br>
-                    <strong>💡 Consulta de Filiais:</strong> Busque por CNPJs iniciados com {cnpj_raiz} para encontrar todas as unidades<br>
-                    <strong>📍 Endereço Principal:</strong> {row['Endereço']}
+                    <strong>💡 Como encontrar TODAS as filiais:</strong><br><br>
+                    1️⃣ Acesse: <a href="https://solucoes.receita.fazenda.gov.br/servicos/cnpjreva/cnpjreva_solicitacao.asp" target="_blank">Portal da Receita Federal</a><br>
+                    2️⃣ Busque por CNPJs que começam com: <strong>{cnpj_raiz}</strong><br>
+                    3️⃣ Ou use serviços pagos como Serasa, Boa Vista, ou API da Serpro<br><br>
+                    <strong>📍 Endereço desta unidade:</strong> {row['Endereço']}<br>
+                    <strong>🏭 Setor de Atuação:</strong> {row['Atividade Principal']}
                 </div>
                 """, unsafe_allow_html=True)
+            
+            # SEÇÃO 2: NOTÍCIAS ATUAIS
+            st.markdown("---")
+            st.markdown("### 📰 Notícias e Informações Atuais")
+            
+            with st.spinner("🔍 Buscando notícias recentes da empresa..."):
                 
-                # ANÁLISE SETORIAL
-                st.markdown("#### 📊 Contexto do Setor")
+                # Aqui você deve implementar a busca real via API
+                # Exemplo de estrutura de resposta esperada
                 
                 st.markdown(f"""
                 <div class="alerta-box">
-                    <strong>🏭 Atividade:</strong> {row['Atividade Principal']}<br>
-                    <strong>📈 Classificação:</strong> {row['Porte']}<br>
-                    <strong>🌎 Região:</strong> {row['Cidade/UF']}<br>
-                    <strong>💼 Capital Declarado:</strong> {row['Capital Social']}
+                    <strong>🔎 Buscando notícias sobre:</strong> {row['Razão Social']}<br>
+                    <strong>📅 Período:</strong> Últimos 6 meses<br>
+                    <strong>🌐 Fontes:</strong> Google News, portais setoriais, imprensa especializada
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # LINKS ÚTEIS (Reduzido)
-                st.markdown("#### 🔗 Recursos Complementares")
+                # SIMULAÇÃO DE NOTÍCIAS (substituir por busca real)
+                # Use Google News API, NewsAPI, ou scraping
                 
-                col_l1, col_l2, col_l3 = st.columns(3)
-                nome_busca = row['Nome Busca'].replace(' ', '+')
-                razao_busca = row['Razão Social'].replace(' ', '+')
+                noticias_encontradas = [
+                    {
+                        "titulo": f"Aguardando integração com API de notícias",
+                        "conteudo": f"Para ver notícias reais sobre {row['Razão Social']}, integre com Google News API, NewsAPI.org ou similar. O sistema está pronto para receber e exibir as notícias assim que a API for configurada.",
+                        "fonte": "Sistema BDR Hunter",
+                        "data": "Hoje",
+                        "categoria": "info",
+                        "relevancia": "alta"
+                    }
+                ]
                 
-                with col_l1:
-                    st.markdown(f"🌐 [Google News](https://www.google.com/search?q={razao_busca}+notícias&tbm=nws)")
-                    st.markdown(f"💼 [LinkedIn](https://www.linkedin.com/search/results/companies/?keywords={nome_busca})")
+                # Links de busca manual enquanto a API não está integrada
+                st.markdown("#### 🔗 Busca Manual de Notícias (Temporário)")
                 
-                with col_l2:
-                    st.markdown(f"📈 [Dados Financeiros](https://www.google.com/search?q={razao_busca}+balanço)")
-                    st.markdown(f"🏭 [Unidades](https://www.google.com/search?q={razao_busca}+fábricas+unidades)")
+                col_news1, col_news2, col_news3 = st.columns(3)
                 
-                with col_l3:
-                    st.markdown(f"🔍 [Portal Receita](https://servicos.receita.fazenda.gov.br/Servicos/cnpjreva/Cnpjreva_Solicitacao.asp)")
-                    st.markdown(f"📊 [Setor](https://www.google.com/search?q={row['Atividade Principal'][:30].replace(' ', '+')}+mercado)")
+                nome_busca = row['Razão Social'].replace(' ', '+')
+                
+                with col_news1:
+                    st.markdown(f"""
+                    **Notícias Gerais:**
+                    - [Google News - Geral](https://www.google.com/search?q={nome_busca}&tbm=nws)
+                    - [Google News - Últimos 30 dias](https://www.google.com/search?q={nome_busca}&tbm=nws&tbs=qdr:m)
+                    """)
+                
+                with col_news2:
+                    st.markdown(f"""
+                    **Expansão e Investimentos:**
+                    - [Expansão/Fábricas](https://www.google.com/search?q={nome_busca}+expansão+OR+fábrica+OR+investimento&tbm=nws)
+                    - [Novos Projetos](https://www.google.com/search?q={nome_busca}+projeto+OR+inauguração&tbm=nws)
+                    """)
+                
+                with col_news3:
+                    st.markdown(f"""
+                    **Dados Corporativos:**
+                    - [Resultados Financeiros](https://www.google.com/search?q={nome_busca}+balanço+OR+resultado&tbm=nws)
+                    - [Unidades/Filiais](https://www.google.com/search?q={nome_busca}+filiais+OR+unidades)
+                    """)
+                
+                # Exibir notícias formatadas
+                st.markdown("#### 📋 Notícias Encontradas")
+                
+                for idx, noticia in enumerate(noticias_encontradas, 1):
+                    
+                    # Definir cores por categoria
+                    if noticia["categoria"] == "expansao":
+                        cor_borda = "#28a745"
+                        icone = "🏭"
+                    elif noticia["categoria"] == "investimento":
+                        cor_borda = "#007bff"
+                        icone = "💰"
+                    elif noticia["categoria"] == "crise":
+                        cor_borda = "#dc3545"
+                        icone = "⚠️"
+                    elif noticia["categoria"] == "mercado":
+                        cor_borda = "#6f42c1"
+                        icone = "📊"
+                    else:
+                        cor_borda = "#667eea"
+                        icone = "📌"
+                    
+                    st.markdown(f"""
+                    <div class="noticia-box" style="border-left: 5px solid {cor_borda};">
+                        <div class="noticia-titulo">{icone} {noticia['titulo']}</div>
+                        <p class="noticia-conteudo">{noticia['conteudo']}</p>
+                        <div class="noticia-fonte">
+                            📰 {noticia['fonte']} | 📅 {noticia['data']} | 
+                            🎯 Relevância: <strong>{noticia['relevancia'].upper()}</strong>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Instruções para integração
+                st.markdown("---")
+                st.info("""
+                **💡 Para ativar busca automática de notícias:**
+                
+                1. Cadastre-se em uma API de notícias:
+                   - NewsAPI.org (gratuito até 100 req/dia)
+                   - Google News API
+                   - Bing News Search API
+                
+                2. Adicione sua chave API no código
+                
+                3. As notícias aparecerão automaticamente aqui
+                """)
+            
+            # SEÇÃO 3: CONTEXTO SETORIAL
+            st.markdown("---")
+            st.markdown("### 📊 Análise do Setor")
+            
+            st.markdown(f"""
+            <div class="info-box">
+                <strong>🏭 Atividade Principal:</strong> {row['Atividade Principal']}<br>
+                <strong>📈 Classificação de Porte:</strong> {row['Porte']}<br>
+                <strong>🌎 Região de Operação:</strong> {row['Cidade/UF']}<br>
+                <strong>💼 Capital Social Declarado:</strong> {row['Capital Social']}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Links setoriais
+            setor_busca = row['Atividade Principal'][:40].replace(' ', '+')
+            st.markdown(f"🔍 [Tendências do Setor no Google](https://www.google.com/search?q={setor_busca}+mercado+brasil+2024+2025&tbm=nws)")
 
     # MAPA
     st.divider()
     st.markdown("### 🗺️ Localização da Empresa")
     if emp_sel:
         row = df[df["Empresa"] == emp_sel].iloc[0]
-        st.info(f"📍 **{row['Empresa']}** | {row['Status']} | {row['Atividade Principal']}")
-        query = f"{row['Nome Busca']} {row['Endereço']}".replace(" ", "+")
+        st.info(f"📍 **{row['Empresa']}** | {row['Endereço']}")
+        query = f"{row['Razão Social']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
 st.markdown("---")
-st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson96 | Inteligência estratégica para prospecção B2B")
+st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson Vallim | Inteligência estratégica para prospecção B2B")
