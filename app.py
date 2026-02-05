@@ -313,18 +313,13 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             </div>
             """, unsafe_allow_html=True)
         
-        # Informações Adicionais
-        cnpj_raiz = row['CNPJ'][:8]
+        # Verificação de Filiais
+        tem_filiais = "Sim" if row['Tipo'] == "🏢 MATRIZ" else "Não disponível"
+        
         st.markdown(f"""
         <div class="info-box">
-            <strong>🏢 Informações Corporativas</strong><br><br>
-            <strong>📋 CNPJ Raiz:</strong> {cnpj_raiz}<br>
-            <strong>🏭 Tipo de Estabelecimento:</strong> {row['Tipo']}<br>
-            <strong>🏭 Atividade Principal:</strong> {row['Atividade Principal']}<br>
-            <strong>📍 Endereço Completo:</strong> {row['Endereço']}<br>
-            <strong>💼 Capital Social:</strong> {row['Capital Social']}<br><br>
-            <strong>💡 Dica:</strong> Para consultar filiais, use o CNPJ raiz <strong>{cnpj_raiz}</strong> no 
-            <a href="https://solucoes.receita.fazenda.gov.br/servicos/cnpjreva/cnpjreva_solicitacao.asp" target="_blank">portal da Receita Federal</a>
+            <strong>🏢 Existe outras unidades?</strong><br>
+            <strong style="font-size: 1.3em; color: #667eea;">{tem_filiais}</strong>
         </div>
         """, unsafe_allow_html=True)
         
@@ -334,4 +329,4 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
 st.markdown("---")
-st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson96 | Inteligência estratégica para prospecção B2B")
+st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson Vallim | Inteligência estratégica para prospecção B2B")
