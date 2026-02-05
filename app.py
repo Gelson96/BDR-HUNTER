@@ -94,52 +94,6 @@ def verificar_situacao_especial(d):
         return f"🚫 {d.get('descricao_situacao_cadastral')}"
     return "✅ REGULAR"
 
-def verificar_outras_unidades(cnpj, cnpj_raiz):
-    """
-    Verifica se existem outras unidades testando CNPJs sequenciais
-    Retorna: "Sim" (se encontrar), "Não" (se não encontrar), ou mensagem de erro
-    """
-    try:
-        cnpj_atual = "".join(filter(str.isdigit, cnpj))
-        filial_atual = cnpj_atual[8:12]
-        
-        # Se não for matriz (0001), retorna que é filial
-        if filial_atual != "0001":
-            return "Esta é uma filial"
-        
-        # É matriz - vamos verificar se existem filiais (0002, 0003, etc)
-        encontrou_filial = False
-        
-        # Testa os próximos 5 números de filial
-        for num_filial in range(2, 7):  # Testa 0002 até 0006
-            # Monta o CNPJ base (sem DV)
-            cnpj_teste_base = f"{cnpj_raiz}{num_filial:04d}"
-            
-            # Testa com diferentes combinações de DV (simplificado)
-            for dv in ["00", "01", "10", "11", "20", "30", "40", "50", "60", "70", "80", "90"]:
-                cnpj_teste = cnpj_teste_base + dv
-                
-                try:
-                    time.sleep(0.3)  # Rate limit
-                    res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_teste}", timeout=3)
-                    
-                    if res.status_code == 200:
-                        # Encontrou uma filial!
-                        return "Sim"
-                    
-                except:
-                    continue
-            
-            # Se já testou 3 filiais sem sucesso, para
-            if num_filial >= 4:
-                break
-        
-        # Não encontrou filiais nas tentativas
-        return "Não encontrado"
-        
-    except Exception as e:
-        return "Erro na verificação"
-
 def processar_lista(lista_cnpjs):
     dados_finais = []
     progresso = st.progress(0)
@@ -366,35 +320,10 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             </div>
             """, unsafe_allow_html=True)
         
-        # Verificação Real de Outras Unidades
-        if row['Tipo'] == "🏢 MATRIZ":
-            with st.spinner("🔍 Verificando existência de outras unidades..."):
-                cnpj_raiz = row['CNPJ'][:8]
-                resposta_filiais = verificar_outras_unidades(row['CNPJ'], cnpj_raiz)
-        else:
-            resposta_filiais = "Esta é uma filial"
-        
-        st.markdown(f"""
-        <div class="info-box">
-            <strong>🏢 Existe outras unidades?</strong><br>
-            <strong style="font-size: 1.5em; color: #667eea;">{resposta_filiais}</strong>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Alerta se não conseguiu verificar
-        if resposta_filiais in ["Não encontrado", "Erro na verificação"]:
-            st.markdown(f"""
-            <div class="alerta-box">
-                <strong>💡 Dica:</strong> Para verificação completa de todas as filiais, consulte o 
-                <a href="https://solucoes.receita.fazenda.gov.br/servicos/cnpjreva/cnpjreva_solicitacao.asp" target="_blank">portal da Receita Federal</a> 
-                usando o CNPJ raiz <strong>{row['CNPJ'][:8]}</strong>
-            </div>
-            """, unsafe_allow_html=True)
-        
         # Mapa
         st.info(f"📍 **{row['Empresa']}** | {row['Endereço']}")
         query = f"{row['Razão Social']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
 st.markdown("---")
-st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson96 | Inteligência estratégica para prospecção B2B")
+st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson Vallim | Inteligência estratégica para prospecção B2B")
