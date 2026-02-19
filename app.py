@@ -2,14 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-from datetime import datetime, timedelta
 import time
 
 # 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
 
 URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
-GEMINI_API_KEY = "AIzaSyBpzFNt13y2t1AB8aSXQAfyoWVpOvLbvFw"
 
 # --- CSS ---
 st.markdown(
@@ -31,43 +29,6 @@ st.markdown(
         font-weight: bold;
         margin: 10px 0;
     }}
-    .noticia-box {{
-        background: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-left: 5px solid #667eea;
-        padding: 18px;
-        margin: 12px 0;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }}
-    .noticia-titulo {{
-        font-weight: bold;
-        color: #1a1a1a;
-        margin-bottom: 10px;
-        font-size: 1.15em;
-        line-height: 1.4;
-    }}
-    .noticia-conteudo {{
-        color: #444;
-        line-height: 1.7;
-        margin: 10px 0;
-        font-size: 0.95em;
-    }}
-    .noticia-fonte {{
-        font-size: 0.82em;
-        color: #888;
-        margin-top: 10px;
-        padding-top: 8px;
-        border-top: 1px solid #f0f0f0;
-        font-style: italic;
-    }}
-    .alerta-box {{
-        background: #fff3cd;
-        border-left: 4px solid #ffc107;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
-    }}
     .sucesso-box {{
         background: #d4edda;
         border-left: 4px solid #28a745;
@@ -78,6 +39,13 @@ st.markdown(
     .info-box {{
         background: #d1ecf1;
         border-left: 4px solid #17a2b8;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }}
+    .alerta-box {{
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
         padding: 15px;
         margin: 10px 0;
         border-radius: 5px;
@@ -93,174 +61,11 @@ st.subheader("Inteligência de Mercado & Prospecção Estratégica")
 st.divider()
 
 # --- FUNÇÕES ---
-def extrair_cnpjs(texto):
-    """Extrai CNPJs em qualquer formato: com ou sem pontuação"""
-    # Normaliza: remove espaços duplos e quebras extras
-    texto = re.sub(r'\s+', ' ', texto.strip())
-    
-    # Padrão 1: CNPJ formatado XX.XXX.XXX/XXXX-XX
-    formatados = re.findall(r'\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}', texto)
-    
-    # Remove os formatados para não confundir na busca de números soltos
-    texto_sem_formatados = texto
-    for f in formatados:
-        texto_sem_formatados = texto_sem_formatados.replace(f, ' ')
-    
-    # Padrão 2: sequências de 14 dígitos soltos (sem formatação)
-    soltos = re.findall(r'\b\d{14}\b', texto_sem_formatados)
-    
-    # Padrão 3: sequências de 8+ dígitos que possam ser CNPJ parcial
-    parciais = re.findall(r'\b\d{8,13}\b', texto_sem_formatados)
-    
-    # Junta tudo, limpa e deduplica
-    todos = []
-    vistos = set()
-    
-    for cnpj_raw in formatados + soltos:
-        cnpj_limpo = re.sub(r'\D', '', cnpj_raw).zfill(14)
-        if cnpj_limpo not in vistos and len(cnpj_limpo) == 14:
-            todos.append(cnpj_limpo)
-            vistos.add(cnpj_limpo)
-    
-    # Só adiciona parciais se não encontrou nenhum formatado/solto
-    if not todos:
-        for cnpj_raw in parciais:
-            cnpj_limpo = re.sub(r'\D', '', cnpj_raw).zfill(14)
-            if cnpj_limpo not in vistos and len(cnpj_limpo) == 14:
-                todos.append(cnpj_limpo)
-                vistos.add(cnpj_limpo)
-    
-    return todos
+def limpar_nome_empresa(nome):
     if not nome: return ""
     termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL|MATRIZ)\b'
     nome_limpo = re.sub(termos, '', nome, flags=re.IGNORECASE)
     return re.sub(r'\s+', ' ', nome_limpo).strip()
-
-def buscar_noticias_gemini(empresa_nome, tipo_busca="empresa"):
-    """Busca notícias usando Google Gemini API"""
-    try:
-        nome_limpo = limpar_nome_empresa(empresa_nome)
-        
-        # Monta o prompt para o Gemini - SEM limite de tempo
-        prompt = f"""
-Busque notícias relevantes sobre a empresa "{empresa_nome}" (também conhecida como "{nome_limpo}").
-
-Foque em notícias sobre:
-- Expansão de fábricas ou unidades
-- Fechamento de unidades
-- Novos investimentos
-- Contratações ou demissões em massa
-- Resultados financeiros
-- Mudanças estratégicas importantes
-- Qualquer notícia relevante para prospecção comercial
-
-Para cada notícia encontrada, retorne APENAS o JSON puro, sem markdown, sem explicações, no formato exato:
-
-{{"noticias": [{{"titulo": "título completo", "conteudo": "resumo em 2-3 frases", "fonte": "nome do veículo", "data": "DD/MM/AAAA", "categoria": "expansao ou crise ou financeiro ou geral"}}]}}
-
-Retorne no máximo 5 notícias mais relevantes. Se não encontrar, retorne: {{"noticias": []}}
-"""
-        
-        # Usa o modelo correto: gemini-1.5-flash
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        
-        headers = {'Content-Type': 'application/json'}
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.3,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 2048,
-            }
-        }
-        
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Extrai o texto da resposta
-            try:
-                texto_resposta = data['candidates'][0]['content']['parts'][0]['text']
-                
-                # Remove qualquer markdown ou texto extra
-                texto_resposta = texto_resposta.strip()
-                
-                # Se tem ```json, remove
-                if '```json' in texto_resposta:
-                    texto_resposta = texto_resposta.split('```json')[1].split('```')[0].strip()
-                elif '```' in texto_resposta:
-                    texto_resposta = texto_resposta.split('```')[1].split('```')[0].strip()
-                
-                # Parse do JSON
-                import json
-                resultado = json.loads(texto_resposta)
-                
-                noticias_formatadas = []
-                
-                for noticia in resultado.get('noticias', []):
-                    categoria = noticia.get('categoria', 'geral')
-                    
-                    if categoria == "expansao":
-                        icone = "🏭"
-                        cor = "#28a745"
-                    elif categoria == "crise":
-                        icone = "⚠️"
-                        cor = "#dc3545"
-                    elif categoria == "financeiro":
-                        icone = "💰"
-                        cor = "#007bff"
-                    else:
-                        icone = "📌"
-                        cor = "#667eea"
-                    
-                    noticias_formatadas.append({
-                        'titulo': noticia.get('titulo', 'Sem título'),
-                        'conteudo': noticia.get('conteudo', 'Sem descrição'),
-                        'fonte': noticia.get('fonte', 'Fonte não identificada'),
-                        'data': noticia.get('data', 'Data não disponível'),
-                        'categoria': categoria,
-                        'icone': icone,
-                        'cor': cor
-                    })
-                
-                return noticias_formatadas
-                
-            except (json.JSONDecodeError, KeyError, IndexError) as e:
-                st.error(f"❌ Erro ao processar resposta: {str(e)}")
-                if 'texto_resposta' in locals():
-                    with st.expander("🔍 Ver resposta do Gemini"):
-                        st.code(texto_resposta)
-                return []
-        else:
-            st.error(f"❌ Erro na API Gemini: {response.status_code}")
-            with st.expander("🔍 Ver detalhes do erro"):
-                st.code(response.text)
-            return []
-            
-    except Exception as e:
-        st.error(f"❌ Erro geral: {str(e)}")
-        import traceback
-        with st.expander("🔍 Ver detalhes técnicos"):
-            st.code(traceback.format_exc())
-        return []
-
-def buscar_filiais_cnpj(cnpj_raiz):
-    """Busca informações sobre outras unidades da empresa"""
-    try:
-        # Nota: A BrasilAPI não retorna lista de filiais, apenas dados do CNPJ específico
-        # Esta função retorna informações básicas e orientações
-        return {
-            'cnpj_raiz': cnpj_raiz,
-            'mensagem': 'Para consultar todas as filiais, use o portal da Receita Federal ou APIs especializadas (Serpro, ReceitaWS Premium).',
-            'possui_filiais': 'Verificar manualmente'
-        }
-    except:
-        return None
 
 def processar_inteligencia_premium(d):
     porte_cod = d.get('porte')
@@ -294,9 +99,10 @@ def processar_lista(lista_cnpjs):
     progresso = st.progress(0)
     status_text = st.empty()
     
-    for i, cnpj in enumerate(lista_cnpjs):
+    for i, cnpj_bruto in enumerate(lista_cnpjs):
+        cnpj = "".join(filter(str.isdigit, str(cnpj_bruto))).zfill(14)
         try:
-            status_text.text(f"🔍 Processando {i+1}/{len(lista_cnpjs)}: {cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:14]}")
+            status_text.text(f"🔍 Processando {i+1}/{len(lista_cnpjs)}...")
             res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
             if res.status_code == 200:
                 d = res.json()
@@ -308,7 +114,7 @@ def processar_lista(lista_cnpjs):
                 dados_finais.append({
                     "Empresa": fantasia,
                     "Razão Social": d.get('razao_social'),
-                    "CNPJ": f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:14]}",
+                    "CNPJ": cnpj,
                     "Tipo": tipo_estabelecimento,
                     "Status": status_emp,
                     "Atividade Principal": d.get('cnae_fiscal_descricao', 'N/I'),
@@ -335,30 +141,25 @@ def processar_lista(lista_cnpjs):
 # --- INTERFACE ---
 col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
 with col_in2:
-    entrada = st.text_area(
-        "Insira os CNPJs para análise (qualquer formato):", 
-        height=150,
-        placeholder="Aceita qualquer formato:\n12.345.678/0001-99\n12345678000199\nMisturado, com espaço, vírgula..."
-    )
+    entrada = st.text_area("Insira os CNPJs para análise de risco e porte:", height=150)
     if st.button("🚀 Iniciar Análise", use_container_width=True):
         if entrada:
-            cnpjs = extrair_cnpjs(entrada)
-            if cnpjs:
-                st.success(f"✅ {len(cnpjs)} CNPJ(s) identificado(s). Iniciando análise...")
+            cnpjs = re.findall(r'\d+', entrada)
+            if cnpjs: 
                 st.session_state.df_resultado = processar_lista(cnpjs)
-            else:
-                st.error("❌ Nenhum CNPJ válido encontrado. Verifique os dados inseridos.")
 
 if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
     df = st.session_state.df_resultado
     
+    # Tabela Principal
     st.dataframe(
         df.drop(columns=['Endereço', 'Nome Busca', 'Faturamento_Min', 'Faturamento_Max', 'Razão Social', 'CNPJ']),
         column_config={
             "LinkedIn": st.column_config.LinkColumn("Pessoas"), 
             "WhatsApp": st.column_config.LinkColumn("Zap")
         },
-        hide_index=True, use_container_width=True
+        hide_index=True, 
+        use_container_width=True
     )
     
     # --- POTENCIAL DE EMBALAGENS ---
@@ -472,19 +273,26 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
         
         st.info(f"💡 **Cálculo baseado em:** 3% do faturamento estimado de **{len(df_calculavel)} empresa(s)** | Mínimo: limite inferior | Máximo: limite superior")
     
-    st.download_button("📥 Baixar Relatório", data=df.to_csv(index=False).encode('utf-8-sig'), file_name="bdr_hunter_risk.csv", use_container_width=True)
+    # Download do Relatório
+    st.download_button(
+        "📥 Baixar Relatório", 
+        data=df.to_csv(index=False).encode('utf-8-sig'), 
+        file_name="bdr_hunter_risk.csv", 
+        use_container_width=True
+    )
 
-    # --- INTELIGÊNCIA DE MERCADO ---
+    # --- MAPA DE LOCALIZAÇÃO ---
     st.divider()
-    st.markdown("### 🔍 Inteligência de Mercado")
+    st.markdown("### 🗺️ Investigação de Localização")
     
-    emp_sel = st.selectbox("🏭 Selecione a Empresa para Análise:", df["Empresa"].tolist())
+    emp_sel = st.selectbox("🏭 Selecione a Empresa:", df["Empresa"].tolist())
     
     if emp_sel:
         row = df[df["Empresa"] == emp_sel].iloc[0]
         
-        # Informações Básicas
+        # Informações da Empresa Selecionada
         col_info1, col_info2, col_info3 = st.columns(3)
+        
         with col_info1:
             st.markdown(f"""
             <div class="sucesso-box">
@@ -512,68 +320,10 @@ if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empt
             </div>
             """, unsafe_allow_html=True)
         
-        # Botão Expansível para Análise Completa
-        if 'mostrar_inteligencia' not in st.session_state:
-            st.session_state.mostrar_inteligencia = {}
-        
-        if emp_sel not in st.session_state.mostrar_inteligencia:
-            st.session_state.mostrar_inteligencia[emp_sel] = False
-        
-        if st.button(
-            f"{'🔽 RECOLHER ANÁLISE' if st.session_state.mostrar_inteligencia[emp_sel] else '🔍 BUSCAR INTELIGÊNCIA COMPLETA'}", 
-            use_container_width=True, 
-            type="primary",
-            key=f"btn_intel_{emp_sel}"
-        ):
-            st.session_state.mostrar_inteligencia[emp_sel] = not st.session_state.mostrar_inteligencia[emp_sel]
-        
-        # Conteúdo Expansível
-        if st.session_state.mostrar_inteligencia[emp_sel]:
-            
-            # Informação sobre filiais
-            st.markdown("---")
-            cnpj_raiz = row['CNPJ'][:8]
-            st.markdown(f"""
-            <div class="info-box">
-                <strong>🏢 Estrutura Corporativa</strong><br><br>
-                <strong>📋 CNPJ Raiz:</strong> {cnpj_raiz}<br>
-                <strong>🏭 Tipo do Estabelecimento:</strong> {row['Tipo']}<br>
-                <strong>📍 Endereço:</strong> {row['Endereço']}<br><br>
-                <strong>💡 Outras Unidades:</strong> Para verificar se existem filiais ou outras unidades (sede/filiais) pelo Brasil, 
-                consulte o portal da Receita Federal usando o CNPJ raiz <strong>{cnpj_raiz}</strong> ou utilize serviços como 
-                Serasa, Boa Vista SCPC, ou APIs especializadas (Serpro, ReceitaWS Premium).
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # NOTÍCIAS DA EMPRESA
-            st.markdown("---")
-            st.markdown("### 📰 Notícias e Informações Atuais da Empresa")
-            
-            with st.spinner(f"🔍 Buscando notícias sobre {row['Razão Social']}..."):
-                noticias_empresa = buscar_noticias_gemini(row['Razão Social'], tipo_busca="empresa")
-                
-                if noticias_empresa:
-                    for noticia in noticias_empresa:
-                        st.markdown(f"""
-                        <div class="noticia-box" style="border-left: 5px solid {noticia['cor']};">
-                            <div class="noticia-titulo">{noticia['icone']} {noticia['titulo']}</div>
-                            <p class="noticia-conteudo">{noticia['conteudo']}</p>
-                            <div class="noticia-fonte">
-                                📰 {noticia['fonte']} | 📅 {noticia['data']}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.info("ℹ️ Nenhuma notícia encontrada sobre esta empresa.")
-
-    # MAPA
-    st.divider()
-    st.markdown("### 🗺️ Localização da Empresa")
-    if emp_sel:
-        row = df[df["Empresa"] == emp_sel].iloc[0]
+        # Mapa
         st.info(f"📍 **{row['Empresa']}** | {row['Endereço']}")
         query = f"{row['Razão Social']} {row['Endereço']}".replace(" ", "+")
         st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
 st.markdown("---")
-st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson96 | Inteligência estratégica para prospecção B2B")
+st.markdown("💡 **BDR Hunter Pro** - Desenvolvido por Gelson Vallim | Inteligência estratégica para prospecção B2B")
