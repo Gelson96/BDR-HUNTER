@@ -489,7 +489,11 @@ tab1, tab2, tab3 = st.tabs(["🏢 Análise de Empresas (CNPJ)", "🔍 Busca de C
 with tab1:
     col_in1, col_in2, col_in3 = st.columns([1, 4, 1])
     with col_in2:
-        entrada = st.text_area("Insira os CNPJs para análise:", height=150)
+        entrada = st.text_area(
+            "Insira os CNPJs para análise:", 
+            height=150,
+            placeholder="Você pode inserir com ou sem pontuação:\n09.560.231/0001-24\n09560231000124\n\nVários CNPJs (um por linha ou separados por vírgula)"
+        )
         if st.button("🚀 Iniciar Análise", use_container_width=True, key="btn_cnpj"):
             if entrada:
                 cnpjs = re.findall(r'\d+', entrada)
