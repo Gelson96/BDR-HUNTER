@@ -184,6 +184,26 @@ st.subheader("Inteligência de Mercado & Prospecção Estratégica")
 st.divider()
 
 # --- FUNÇÕES CNPJ ---
+def extrair_cnpjs(texto):
+    """Extrai CNPJs do texto, com ou sem pontuação"""
+    cnpjs = []
+    
+    # Padrão 1: CNPJ formatado (XX.XXX.XXX/XXXX-XX)
+    formatados = re.findall(r'\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}', texto)
+    for cnpj in formatados:
+        # Remove pontuação
+        cnpj_limpo = re.sub(r'\D', '', cnpj)
+        if len(cnpj_limpo) == 14:
+            cnpjs.append(cnpj_limpo)
+    
+    # Padrão 2: CNPJ sem formatação (14 dígitos seguidos)
+    sem_formatacao = re.findall(r'\b\d{14}\b', texto)
+    for cnpj in sem_formatacao:
+        if cnpj not in cnpjs:  # Evita duplicatas
+            cnpjs.append(cnpj)
+    
+    return cnpjs
+
 def limpar_nome_empresa(nome):
     if not nome: return ""
     termos = r'\b(LTDA|S\.?A|S/A|INDUSTRIA|COMERCIO|EIRELI|ME|EPP|CONSTRUTORA|SERVICOS|BRASIL|MATRIZ)\b'
@@ -496,9 +516,12 @@ with tab1:
         )
         if st.button("🚀 Iniciar Análise", use_container_width=True, key="btn_cnpj"):
             if entrada:
-                cnpjs = re.findall(r'\d+', entrada)
-                if cnpjs: 
+                cnpjs = extrair_cnpjs(entrada)
+                if cnpjs:
+                    st.info(f"📋 {len(cnpjs)} CNPJ(s) identificado(s)")
                     st.session_state.df_resultado = processar_lista(cnpjs)
+                else:
+                    st.error("❌ Nenhum CNPJ válido encontrado. Verifique o formato.")
 
     if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
         df = st.session_state.df_resultado
