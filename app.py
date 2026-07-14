@@ -15,6 +15,13 @@ APOLLO_API_KEY = "cSG2GJRmKBGpdGpNykMJuA"
 SNOV_USER_ID = "3339dd3a641d4a40440040bdf815c895"
 SNOV_API_SECRET = "66325b5f11c5e6708f2ffeb01d6f85e8"
 
+# Cabeçalho usado nas chamadas HTTP (a BrasilAPI, em especial, costuma
+# recusar/limitar requisições sem um User-Agent identificável)
+HTTP_HEADERS = {
+    "User-Agent": "BDR-Hunter-Pro/1.0 (+https://gelsonvallim.com)",
+    "Accept": "application/json",
+}
+
 # --- CSS COMPLETO ---
 st.markdown(
     f"""
@@ -53,6 +60,13 @@ st.markdown(
     .alerta-box {{
         background: #fff3cd;
         border-left: 4px solid #ffc107;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }}
+    .erro-box {{
+        background: #f8d7da;
+        border-left: 4px solid #dc3545;
         padding: 15px;
         margin: 10px 0;
         border-radius: 5px;
@@ -237,18 +251,52 @@ def verificar_situacao_especial(d):
         return f"🚫 {d.get('descricao_situacao_cadastral')}"
     return "✅ REGULAR"
 
+def consultar_cnpj(cnpj):
+    """
+    Consulta um único CNPJ na BrasilAPI.
+    Retorna (dados, None) em caso de sucesso ou (None, motivo_do_erro) em caso de falha.
+    Isso evita que erros sejam engolidos silenciosamente, como acontecia antes com
+    um 'except: continue' genérico.
+    """
+    if len(cnpj) != 14 or not cnpj.isdigit():
+        return None, "CNPJ inválido (deve conter 14 dígitos numéricos)"
+
+    url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
+    try:
+        res = requests.get(url, headers=HTTP_HEADERS, timeout=15)
+    except requests.exceptions.Timeout:
+        return None, "Tempo de resposta esgotado (timeout) ao consultar a BrasilAPI"
+    except requests.exceptions.ConnectionError:
+        return None, "Falha de conexão com a BrasilAPI (verifique sua internet ou tente novamente)"
+    except requests.exceptions.RequestException as e:
+        return None, f"Erro de requisição: {e}"
+
+    if res.status_code == 200:
+        try:
+            return res.json(), None
+        except ValueError:
+            return None, "A BrasilAPI retornou uma resposta que não é um JSON válido"
+    elif res.status_code == 404:
+        return None, "CNPJ não encontrado na base da Receita Federal"
+    elif res.status_code == 429:
+        return None, "Limite de requisições da BrasilAPI atingido (aguarde alguns segundos e tente novamente)"
+    else:
+        return None, f"BrasilAPI retornou status HTTP {res.status_code}"
+
 def processar_lista(lista_cnpjs):
     dados_finais = []
+    erros = []
     progresso = st.progress(0)
     status_text = st.empty()
     
     for i, cnpj_bruto in enumerate(lista_cnpjs):
         cnpj = "".join(filter(str.isdigit, str(cnpj_bruto))).zfill(14)
-        try:
-            status_text.text(f"🔍 Processando {i+1}/{len(lista_cnpjs)}...")
-            res = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
-            if res.status_code == 200:
-                d = res.json()
+        status_text.text(f"🔍 Processando {i+1}/{len(lista_cnpjs)}...")
+
+        d, motivo_erro = consultar_cnpj(cnpj)
+
+        if d is not None:
+            try:
                 porte, fat, func, fat_min, fat_max = processar_inteligencia_premium(d)
                 fantasia = d.get('nome_fantasia') or d.get('razao_social')
                 status_emp = verificar_situacao_especial(d)
@@ -273,12 +321,30 @@ def processar_lista(lista_cnpjs):
                     "Faturamento_Min": fat_min,
                     "Faturamento_Max": fat_max
                 })
-            time.sleep(0.3)
-        except: 
-            continue
+            except Exception as e:
+                erros.append((cnpj, f"Erro ao processar os dados retornados: {e}"))
+        else:
+            erros.append((cnpj, motivo_erro))
+
+        time.sleep(0.3)
         progresso.progress((i + 1) / len(lista_cnpjs))
     
     status_text.text("✅ Análise concluída!")
+
+    # Mostra claramente qualquer CNPJ que não pôde ser processado, em vez de
+    # simplesmente sumir sem explicação.
+    if erros:
+        with st.expander(f"⚠️ {len(erros)} CNPJ(s) não processado(s) — clique para ver detalhes", expanded=len(dados_finais) == 0):
+            for cnpj_err, motivo in erros:
+                st.markdown(
+                    f"""<div class="erro-box"><strong>CNPJ:</strong> {cnpj_err}<br>
+                    <strong>Motivo:</strong> {motivo}</div>""",
+                    unsafe_allow_html=True
+                )
+
+    if not dados_finais:
+        st.error("❌ Nenhuma empresa pôde ser processada. Veja os detalhes dos erros acima.")
+
     return pd.DataFrame(dados_finais)
 
 # --- FUNÇÕES LUSHA ---
@@ -522,6 +588,8 @@ with tab1:
                     st.session_state.df_resultado = processar_lista(cnpjs)
                 else:
                     st.error("❌ Nenhum CNPJ válido encontrado. Verifique o formato.")
+            else:
+                st.error("❌ Insira ao menos um CNPJ antes de iniciar a análise.")
 
     if 'df_resultado' in st.session_state and not st.session_state.df_resultado.empty:
         df = st.session_state.df_resultado
