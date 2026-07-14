@@ -331,30 +331,144 @@ def _consultar_minhareceita(cnpj):
     return None, "Falha desconhecida ao consultar minhareceita.org"
 
 
+def _normalizar_cnpjws(d):
+    """Converte a resposta do publica.cnpj.ws para o mesmo formato usado pela BrasilAPI."""
+    est = d.get('estabelecimento') or {}
+    ativ_principal = est.get('atividade_principal') or {}
+    estado = est.get('estado') or {}
+    cidade = est.get('cidade') or {}
+    porte = d.get('porte') or {}
+
+    return {
+        'razao_social': d.get('razao_social'),
+        'nome_fantasia': est.get('nome_fantasia'),
+        'porte': porte.get('id'),
+        'capital_social': float(d.get('capital_social') or 0),
+        'cnae_fiscal_descricao': ativ_principal.get('descricao', 'N/I'),
+        'municipio': cidade.get('nome'),
+        'uf': estado.get('sigla'),
+        'logradouro': est.get('logradouro'),
+        'numero': est.get('numero'),
+        'identificador_matriz_filial': 1 if est.get('tipo') == 'Matriz' else 2,
+        'descricao_situacao_cadastral': (est.get('situacao_cadastral') or '').upper(),
+        'situacao_especial': est.get('situacao_especial') or '',
+    }
+
+
+def _consultar_cnpjws(cnpj):
+    """Fallback adicional: API pública do cnpj.ws (limite de 3 consultas/min)."""
+    url = f"https://publica.cnpj.ws/cnpj/{cnpj}"
+    dados, status, erro_conexao = _requisitar(url, timeout=20)
+
+    if dados is not None:
+        try:
+            return _normalizar_cnpjws(dados), None
+        except Exception as e:
+            return None, f"cnpj.ws retornou dados em formato inesperado: {e}"
+    if status == 404:
+        return None, "CNPJ não encontrado (cnpj.ws)"
+    if status == 429:
+        return None, "Limite de requisições do cnpj.ws atingido (3/min)"
+    if erro_conexao:
+        return None, f"cnpj.ws também falhou ({erro_conexao})"
+    if status:
+        return None, f"cnpj.ws também retornou status HTTP {status}"
+    return None, "Falha desconhecida ao consultar cnpj.ws"
+
+
+_MAPA_PORTE_OPENCNPJ = {
+    "microempresa (me)": "01",
+    "empresa de pequeno porte (epp)": "03",
+    "demais": "05",
+}
+
+def _normalizar_opencnpj(d):
+    """Converte a resposta do OpenCNPJ (schema real: snake_case, capital_social
+    com vírgula decimal, porte como texto) para o mesmo formato usado pela BrasilAPI."""
+    capital_str = str(d.get('capital_social') or '0').replace('.', '').replace(',', '.')
+    try:
+        capital = float(capital_str)
+    except ValueError:
+        capital = 0.0
+
+    porte_texto = (d.get('porte_empresa') or '').strip().lower()
+    porte_cod = _MAPA_PORTE_OPENCNPJ.get(porte_texto)  # None se não reconhecido
+
+    return {
+        'razao_social': d.get('razao_social'),
+        'nome_fantasia': d.get('nome_fantasia') or d.get('razao_social'),
+        'porte': porte_cod,
+        'capital_social': capital,
+        'cnae_fiscal_descricao': d.get('cnae_principal_descricao', 'N/I'),
+        'municipio': d.get('municipio'),
+        'uf': d.get('uf'),
+        'logradouro': d.get('logradouro', ''),
+        'numero': d.get('numero', ''),
+        'identificador_matriz_filial': 1 if d.get('matriz_filial', '').upper() == 'MATRIZ' else 2,
+        'descricao_situacao_cadastral': (d.get('situacao_cadastral') or '').upper(),
+        'situacao_especial': d.get('situacao_especial') or '',
+    }
+
+
+def _consultar_opencnpj(cnpj):
+    """Último fallback: OpenCNPJ — projeto open source, base atualizada
+    mensalmente a partir dos dados públicos da Receita Federal, sem
+    autenticação e com limite de até 50 requisições/segundo por IP."""
+    url = f"https://api.opencnpj.org/{cnpj}"
+    dados, status, erro_conexao = _requisitar(url, timeout=20)
+
+    if dados is not None:
+        try:
+            return _normalizar_opencnpj(dados), None
+        except Exception as e:
+            return None, f"OpenCNPJ retornou dados em formato inesperado: {e}"
+    if status == 404:
+        return None, "CNPJ não encontrado (OpenCNPJ)"
+    if erro_conexao:
+        return None, f"OpenCNPJ também falhou ({erro_conexao})"
+    if status:
+        return None, f"OpenCNPJ também retornou status HTTP {status}"
+    return None, "Falha desconhecida ao consultar OpenCNPJ"
+
+
 def consultar_cnpj(cnpj):
     """
-    Consulta um CNPJ, tentando primeiro a BrasilAPI (com retry) e, se ela
-    continuar falhando por erro transitório, usando minhareceita.org como
-    fallback. Retorna (dados, None) em sucesso ou (None, motivo_do_erro) em falha.
-    Isso evita que erros sejam engolidos silenciosamente, como acontecia antes com
-    um 'except: continue' genérico.
+    Consulta um CNPJ tentando, em ordem, múltiplas fontes públicas até uma
+    responder com sucesso:
+    1. BrasilAPI (com retry para erros 5xx transitórios)
+    2. minhareceita.org
+    3. cnpj.ws (API pública)
+    4. OpenCNPJ
+
+    Isso é necessário porque BrasilAPI e minhareceita.org compartilham a mesma
+    base de dados de origem — se um registro específico causa erro em uma,
+    frequentemente causa o mesmo erro na outra. cnpj.ws e OpenCNPJ usam
+    pipelines de dados independentes e servem como fallback real nesses casos.
+
+    Retorna (dados, None) em sucesso ou (None, motivo_do_erro) em falha total.
     """
     if len(cnpj) != 14 or not cnpj.isdigit():
         return None, "CNPJ inválido (deve conter 14 dígitos numéricos)"
 
-    dados, erro_brasilapi = _consultar_brasilapi(cnpj)
-    if dados is not None:
-        return dados, None
+    fontes = [
+        ("BrasilAPI", lambda: _consultar_brasilapi(cnpj)),
+        ("minhareceita.org", lambda: _consultar_minhareceita(cnpj)),
+        ("cnpj.ws", lambda: _consultar_cnpjws(cnpj)),
+        ("OpenCNPJ", lambda: _consultar_opencnpj(cnpj)),
+    ]
 
-    # Se o erro foi "não encontrado" de verdade, não faz sentido tentar o fallback
-    if "não encontrado" in erro_brasilapi.lower():
-        return None, erro_brasilapi
+    erros_acumulados = []
+    for nome_fonte, funcao in fontes:
+        dados, erro = funcao()
+        if dados is not None:
+            return dados, None
 
-    dados, erro_fallback = _consultar_minhareceita(cnpj)
-    if dados is not None:
-        return dados, None
+        # "Não encontrado" é um resultado definitivo — mas só paramos por aqui
+        # se pelo menos duas fontes concordarem, já que uma fonte isolada
+        # pode simplesmente estar desatualizada.
+        erros_acumulados.append(f"{nome_fonte}: {erro}")
 
-    return None, f"BrasilAPI falhou ({erro_brasilapi}) e o fallback minhareceita.org também falhou ({erro_fallback})"
+    return None, " | ".join(erros_acumulados)
 
 def processar_lista(lista_cnpjs):
     dados_finais = []
