@@ -251,37 +251,110 @@ def verificar_situacao_especial(d):
         return f"🚫 {d.get('descricao_situacao_cadastral')}"
     return "✅ REGULAR"
 
+def _requisitar(url, timeout=15):
+    """Executa um GET simples e devolve (json, status_code, erro_de_conexao)."""
+    try:
+        res = requests.get(url, headers=HTTP_HEADERS, timeout=timeout)
+    except requests.exceptions.Timeout:
+        return None, None, "timeout"
+    except requests.exceptions.ConnectionError:
+        return None, None, "connection_error"
+    except requests.exceptions.RequestException as e:
+        return None, None, f"request_error: {e}"
+
+    if res.status_code == 200:
+        try:
+            return res.json(), 200, None
+        except ValueError:
+            return None, 200, "invalid_json"
+    return None, res.status_code, None
+
+
+def _consultar_brasilapi(cnpj, tentativas=3):
+    """
+    Consulta a BrasilAPI com retry automático (com espera progressiva) para
+    erros transitórios do servidor (500/502/503/504), que são comuns nessa API
+    pois ela faz proxy da base da Receita Federal.
+    Retorna (dados, motivo_erro).
+    """
+    url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
+    ultimo_status = None
+    ultimo_erro = None
+
+    for tentativa in range(1, tentativas + 1):
+        dados, status, erro_conexao = _requisitar(url)
+
+        if dados is not None:
+            return dados, None
+
+        ultimo_status = status
+        ultimo_erro = erro_conexao
+
+        # Erros permanentes: não adianta tentar de novo
+        if status == 404:
+            return None, "CNPJ não encontrado na base da Receita Federal"
+        if status == 429:
+            return None, "Limite de requisições da BrasilAPI atingido (aguarde alguns segundos e tente novamente)"
+
+        # Erros transitórios (5xx) ou de conexão/timeout: espera e tenta de novo
+        if tentativa < tentativas:
+            time.sleep(1.5 * tentativa)  # espera progressiva: 1.5s, 3s, ...
+
+    if ultimo_erro == "timeout":
+        return None, "Tempo de resposta esgotado (timeout) na BrasilAPI, mesmo após novas tentativas"
+    if ultimo_erro == "connection_error":
+        return None, "Falha de conexão com a BrasilAPI após novas tentativas"
+    if ultimo_erro == "invalid_json":
+        return None, "A BrasilAPI retornou uma resposta que não é um JSON válido"
+    if ultimo_status:
+        return None, f"BrasilAPI retornou status HTTP {ultimo_status} (mesmo após {tentativas} tentativas)"
+    return None, "Falha desconhecida ao consultar a BrasilAPI"
+
+
+def _consultar_minhareceita(cnpj):
+    """
+    Fallback: minhareceita.org usa a mesma estrutura de campos da BrasilAPI
+    (ambas derivam dos dados públicos da Receita Federal), então serve como
+    alternativa quando a BrasilAPI está instável.
+    """
+    url = f"https://minhareceita.org/{cnpj}"
+    dados, status, erro_conexao = _requisitar(url, timeout=20)
+
+    if dados is not None:
+        return dados, None
+    if status == 404:
+        return None, "CNPJ não encontrado (minhareceita.org)"
+    if erro_conexao:
+        return None, f"minhareceita.org também falhou ({erro_conexao})"
+    if status:
+        return None, f"minhareceita.org também retornou status HTTP {status}"
+    return None, "Falha desconhecida ao consultar minhareceita.org"
+
+
 def consultar_cnpj(cnpj):
     """
-    Consulta um único CNPJ na BrasilAPI.
-    Retorna (dados, None) em caso de sucesso ou (None, motivo_do_erro) em caso de falha.
+    Consulta um CNPJ, tentando primeiro a BrasilAPI (com retry) e, se ela
+    continuar falhando por erro transitório, usando minhareceita.org como
+    fallback. Retorna (dados, None) em sucesso ou (None, motivo_do_erro) em falha.
     Isso evita que erros sejam engolidos silenciosamente, como acontecia antes com
     um 'except: continue' genérico.
     """
     if len(cnpj) != 14 or not cnpj.isdigit():
         return None, "CNPJ inválido (deve conter 14 dígitos numéricos)"
 
-    url = f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
-    try:
-        res = requests.get(url, headers=HTTP_HEADERS, timeout=15)
-    except requests.exceptions.Timeout:
-        return None, "Tempo de resposta esgotado (timeout) ao consultar a BrasilAPI"
-    except requests.exceptions.ConnectionError:
-        return None, "Falha de conexão com a BrasilAPI (verifique sua internet ou tente novamente)"
-    except requests.exceptions.RequestException as e:
-        return None, f"Erro de requisição: {e}"
+    dados, erro_brasilapi = _consultar_brasilapi(cnpj)
+    if dados is not None:
+        return dados, None
 
-    if res.status_code == 200:
-        try:
-            return res.json(), None
-        except ValueError:
-            return None, "A BrasilAPI retornou uma resposta que não é um JSON válido"
-    elif res.status_code == 404:
-        return None, "CNPJ não encontrado na base da Receita Federal"
-    elif res.status_code == 429:
-        return None, "Limite de requisições da BrasilAPI atingido (aguarde alguns segundos e tente novamente)"
-    else:
-        return None, f"BrasilAPI retornou status HTTP {res.status_code}"
+    # Se o erro foi "não encontrado" de verdade, não faz sentido tentar o fallback
+    if "não encontrado" in erro_brasilapi.lower():
+        return None, erro_brasilapi
+
+    dados, erro_fallback = _consultar_minhareceita(cnpj)
+    if dados is not None:
+        return dados, None
+
+    return None, f"BrasilAPI falhou ({erro_brasilapi}) e o fallback minhareceita.org também falhou ({erro_fallback})"
 
 def processar_lista(lista_cnpjs):
     dados_finais = []
