@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import re
 import time
+import math
 
 # 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
@@ -21,6 +22,12 @@ HTTP_HEADERS = {
     "User-Agent": "BDR-Hunter-Pro/1.0 (+https://gelsonvallim.com)",
     "Accept": "application/json",
 }
+
+# --- CIDADE BASE (origem para cálculo de distância) ---
+CIDADE_BASE_NOME = "Aguaí"
+CIDADE_BASE_UF = "SP"
+CIDADE_BASE_LAT = -22.0577
+CIDADE_BASE_LON = -46.9739
 
 # --- CSS COMPLETO ---
 st.markdown(
@@ -240,6 +247,70 @@ def processar_inteligencia_premium(d):
             return "MÉDIO", "R$ 10M-50M*", "100-250*", 10000000, 50000000
         else: 
             return "MÉDIO", "R$ 4,8M+*", "50+*", 4800000, 10000000
+
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def geocodificar_cidade(municipio, uf, pais="Brasil"):
+    """
+    Geocodifica uma cidade brasileira usando a Nominatim (OpenStreetMap), que é
+    gratuita e não exige chave de API. Resultado é cacheado por 24h para evitar
+    requisições repetidas para a mesma cidade (respeitando o limite de uso da
+    Nominatim de ~1 requisição por segundo).
+    Retorna (lat, lon) ou (None, None) se não encontrar.
+    """
+    if not municipio:
+        return None, None
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            "city": municipio,
+            "state": uf,
+            "country": pais,
+            "format": "json",
+            "limit": 1,
+        }
+        res = requests.get(url, params=params, headers=HTTP_HEADERS, timeout=10)
+        if res.status_code == 200:
+            resultados = res.json()
+            if resultados:
+                return float(resultados[0]["lat"]), float(resultados[0]["lon"])
+        return None, None
+    except Exception:
+        return None, None
+
+def calcular_distancia_km(lat1, lon1, lat2, lon2):
+    """Distância em linha reta (haversine) entre duas coordenadas, em km.
+    Usada apenas como fallback quando o cálculo de rota (OSRM) falha."""
+    R = 6371  # raio médio da Terra em km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    c = 2 * math.asin(math.sqrt(a))
+    return R * c
+
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def calcular_distancia_rodoviaria_km(lat1, lon1, lat2, lon2):
+    """
+    Calcula a distância rodoviária (por estrada) entre dois pontos usando o
+    OSRM (Open Source Routing Machine), servidor público de demonstração,
+    gratuito e sem necessidade de chave de API. O resultado é bem mais
+    próximo do que o Google Maps mostra do que uma distância em linha reta.
+    Retorna (distancia_km, duracao_horas) ou (None, None) se a rota falhar.
+    """
+    try:
+        url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}"
+        params = {"overview": "false"}
+        res = requests.get(url, params=params, headers=HTTP_HEADERS, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("code") == "Ok" and data.get("routes"):
+                rota = data["routes"][0]
+                distancia_km = rota["distance"] / 1000
+                duracao_horas = rota["duration"] / 3600
+                return distancia_km, duracao_horas
+        return None, None
+    except Exception:
+        return None, None
 
 def verificar_situacao_especial(d):
     razao = d.get('razao_social', '').upper()
@@ -833,8 +904,57 @@ with tab1:
                 """, unsafe_allow_html=True)
             
             st.info(f"📍 **{row['Empresa']}** | {row['Endereço']}")
-            query = f"{row['Razão Social']} {row['Endereço']}".replace(" ", "+")
-            st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
+
+            # --- Distância a partir de Aguaí - SP ---
+            cidade_uf = row['Cidade/UF'] or ""
+            municipio_empresa, _, uf_empresa = cidade_uf.partition("/")
+            municipio_empresa = municipio_empresa.strip()
+            uf_empresa = uf_empresa.strip()
+
+            col_mapa, col_distancia = st.columns([3, 1])
+
+            with col_distancia:
+                if municipio_empresa:
+                    with st.spinner("📏 Calculando distância..."):
+                        lat_empresa, lon_empresa = geocodificar_cidade(municipio_empresa, uf_empresa)
+
+                    if lat_empresa is not None:
+                        distancia_rodoviaria, duracao_horas = calcular_distancia_rodoviaria_km(
+                            CIDADE_BASE_LAT, CIDADE_BASE_LON, lat_empresa, lon_empresa
+                        )
+
+                        if distancia_rodoviaria is not None:
+                            horas = int(duracao_horas)
+                            minutos = int((duracao_horas - horas) * 60)
+                            st.markdown(f"""
+                            <div class="potencial-box" style="margin-top:0;">
+                                <div style="font-size: 0.9em;">🚗 Distância de {CIDADE_BASE_NOME}-{CIDADE_BASE_UF}</div>
+                                <div class="potencial-valor">{distancia_rodoviaria:,.0f} km</div>
+                                <div style="font-size: 0.8em; opacity: 0.85;">até {municipio_empresa}/{uf_empresa}</div>
+                                <div style="font-size: 0.75em; opacity: 0.85; margin-top: 4px;">⏱️ ≈ {horas}h{minutos:02d}min de carro</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            # Fallback: se o OSRM falhar, mostra linha reta com aviso claro
+                            distancia_reta = calcular_distancia_km(
+                                CIDADE_BASE_LAT, CIDADE_BASE_LON, lat_empresa, lon_empresa
+                            )
+                            st.markdown(f"""
+                            <div class="alerta-box" style="margin-top:0;">
+                                <div style="font-size: 0.9em;">📍 Distância (linha reta) de {CIDADE_BASE_NOME}-{CIDADE_BASE_UF}</div>
+                                <div class="potencial-valor" style="color:#856404; font-size:1.8em;">~{distancia_reta:,.0f} km</div>
+                                <div style="font-size: 0.75em;">até {municipio_empresa}/{uf_empresa}</div>
+                                <div style="font-size: 0.7em; margin-top: 4px;">⚠️ Rota rodoviária indisponível no momento; valor aproximado por linha reta (menor que a distância real por estrada).</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        st.warning(f"⚠️ Não foi possível localizar '{municipio_empresa}/{uf_empresa}' para calcular a distância.")
+                else:
+                    st.info("Cidade da empresa não identificada.")
+
+            with col_mapa:
+                query = f"{row['Razão Social']} {row['Endereço']}".replace(" ", "+")
+                st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
 # TAB 2: BUSCA DE CONTATOS
 with tab2:
