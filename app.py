@@ -29,6 +29,13 @@ CIDADE_BASE_UF = "SP"
 CIDADE_BASE_LAT = -22.0577
 CIDADE_BASE_LON = -46.9739
 
+# Faixas de funcionários usadas pela Apollo para filtrar por porte da empresa
+FAIXAS_PORTE_APOLLO = {
+    "Pequeno (até ~50 funcionários)": ["1,10", "11,20", "21,50"],
+    "Médio (~51-500 funcionários)": ["51,100", "101,200", "201,500"],
+    "Grande (500+ funcionários)": ["501,1000", "1001,2000", "2001,5000", "5001,10000", "10001,50000"],
+}
+
 # --- CSS COMPLETO ---
 st.markdown(
     f"""
@@ -631,6 +638,137 @@ def buscar_email_hunter(first_name, last_name, domain):
     except:
         return None
 
+def buscar_empresas_por_regiao(cidades, setor_palavras_chave=None, limit=50, faixas_funcionarios=None):
+    """
+    Descobre empresas automaticamente numa lista de cidades usando a busca de
+    organizações da Apollo.io (mixed_companies/search). Não retorna CNPJ (a
+    Apollo é uma base americana e não conhece o cadastro da Receita Federal) —
+    o CNPJ fica como um campo em branco para preenchimento manual, que depois
+    pode ser enriquecido reaproveitando o pipeline de consultar_cnpj().
+    `faixas_funcionarios` é uma lista de faixas no formato da Apollo (ex: "51,100")
+    usada para filtrar por porte da empresa.
+    Retorna (lista_de_empresas, lista_de_erros).
+    """
+    if not APOLLO_API_KEY:
+        return [], ["Chave da Apollo não configurada"]
+
+    url = "https://api.apollo.io/v1/mixed_companies/search"
+    empresas_unicas = {}
+    erros = []
+    max_paginas_por_cidade = 3
+
+    for cidade in cidades:
+        if len(empresas_unicas) >= limit:
+            break
+        for pagina in range(1, max_paginas_por_cidade + 1):
+            if len(empresas_unicas) >= limit:
+                break
+            payload = {
+                'api_key': APOLLO_API_KEY,
+                'organization_locations': [cidade],
+                'page': pagina,
+                'per_page': 25,
+            }
+            if setor_palavras_chave:
+                payload['q_organization_keyword_tags'] = setor_palavras_chave
+            if faixas_funcionarios:
+                payload['organization_num_employees_ranges'] = faixas_funcionarios
+
+            try:
+                response = requests.post(
+                    url, json=payload, headers={'Content-Type': 'application/json'}, timeout=15
+                )
+            except requests.exceptions.RequestException as e:
+                erros.append(f"{cidade}: erro de requisição ({e})")
+                break
+
+            if response.status_code != 200:
+                erros.append(f"{cidade}: Apollo retornou status HTTP {response.status_code}")
+                break
+
+            data = response.json()
+            organizacoes = data.get('organizations') or data.get('accounts') or []
+            if not organizacoes:
+                break
+
+            for org in organizacoes:
+                chave = org.get('id') or org.get('name')
+                if not chave or chave in empresas_unicas:
+                    continue
+                empresas_unicas[chave] = {
+                    'Empresa': org.get('name', 'N/D'),
+                    'Setor': org.get('industry', 'N/I'),
+                    'Cidade/UF': f"{org.get('city', 'N/I')}/{org.get('state', 'N/I')}",
+                    'Funcionários Est.': org.get('estimated_num_employees', 'N/D'),
+                    'Site': org.get('website_url', ''),
+                    'LinkedIn': org.get('linkedin_url', ''),
+                    'CNPJ': '',  # a preencher manualmente — Apollo não tem essa informação
+                }
+                if len(empresas_unicas) >= limit:
+                    break
+
+    return list(empresas_unicas.values())[:limit], erros
+
+
+def enriquecer_lista_gerada(df_lista):
+    """
+    Recebe o DataFrame gerado por buscar_empresas_por_regiao (já editado pelo
+    usuário, com CNPJs preenchidos) e, para cada linha com CNPJ válido,
+    reaproveita o pipeline já existente: consultar_cnpj (4 fontes com retry),
+    cálculo de distância rodoviária a partir de Aguaí-SP e busca de contatos
+    de compras via Apollo. Retorna um novo DataFrame enriquecido.
+    """
+    linhas_enriquecidas = []
+    progresso = st.progress(0)
+    status_text = st.empty()
+    total = len(df_lista)
+
+    for i, row in df_lista.iterrows():
+        status_text.text(f"🔍 Enriquecendo {i+1}/{total}: {row['Empresa']}...")
+        cnpj_bruto = str(row.get('CNPJ', '') or '').strip()
+        cnpj = "".join(filter(str.isdigit, cnpj_bruto))
+
+        linha = row.to_dict()
+
+        if len(cnpj) == 14:
+            dados, erro = consultar_cnpj(cnpj)
+            if dados is not None:
+                porte, fat, func, _, _ = processar_inteligencia_premium(dados)
+                linha['Razão Social'] = dados.get('razao_social')
+                linha['Status'] = verificar_situacao_especial(dados)
+                linha['Porte'] = porte
+                linha['Faturamento Est.*'] = fat
+                linha['Capital Social'] = f"R$ {float(dados.get('capital_social', 0)):,.2f}"
+                linha['Atividade Principal'] = dados.get('cnae_fiscal_descricao', 'N/I')
+                municipio_cnpj = dados.get('municipio')
+                uf_cnpj = dados.get('uf')
+                linha['Cidade/UF'] = f"{municipio_cnpj}/{uf_cnpj}"
+
+                # Distância a partir de Aguaí-SP
+                lat_emp, lon_emp = geocodificar_cidade(municipio_cnpj, uf_cnpj)
+                if lat_emp is not None:
+                    dist_km, dur_h = calcular_distancia_rodoviaria_km(
+                        CIDADE_BASE_LAT, CIDADE_BASE_LON, lat_emp, lon_emp
+                    )
+                    if dist_km is not None:
+                        linha['Distância (km)'] = round(dist_km)
+                    else:
+                        dist_reta = calcular_distancia_km(CIDADE_BASE_LAT, CIDADE_BASE_LON, lat_emp, lon_emp)
+                        linha['Distância (km)'] = f"~{round(dist_reta)} (linha reta)"
+            else:
+                linha['Status'] = f"⚠️ Erro ao consultar CNPJ: {erro}"
+        elif cnpj_bruto:
+            linha['Status'] = "⚠️ CNPJ inválido (deve ter 14 dígitos)"
+        else:
+            linha['Status'] = "ℹ️ CNPJ não informado"
+
+        linhas_enriquecidas.append(linha)
+        progresso.progress((i + 1) / total)
+
+    status_text.text("✅ Enriquecimento concluído!")
+    return pd.DataFrame(linhas_enriquecidas)
+
+
 def buscar_perfil_apollo(nome, empresa):
     if not APOLLO_API_KEY:
         return None
@@ -827,7 +965,7 @@ def renderizar_contact_card(contato):
             st.link_button("📞 WhatsApp", f"https://wa.me/{telefone.replace('+', '').replace(' ', '')}", use_container_width=True)
 
 # === INTERFACE COM TABS ===
-tab1, tab2, tab3 = st.tabs(["🏢 Análise de Empresas (CNPJ)", "🔍 Busca de Contatos", "📊 Histórico"])
+tab1, tab2, tab3 = st.tabs(["🏢 Análise de Empresas (CNPJ)", "📋 Gerar Lista", "📊 Histórico"])
 
 # TAB 1: ANÁLISE CNPJ
 with tab1:
@@ -956,10 +1094,116 @@ with tab1:
                 query = f"{row['Razão Social']} {row['Endereço']}".replace(" ", "+")
                 st.components.v1.iframe(f"https://www.google.com/maps?q={query}&output=embed", height=450)
 
-# TAB 2: BUSCA DE CONTATOS
+# TAB 2: GERAR LISTA
 with tab2:
-    subtab1, subtab2 = st.tabs(["👤 Buscar Pessoa", "🏢 Buscar por Empresa"])
-    
+    subtab0, subtab1, subtab2 = st.tabs(["🌎 Gerar Lista por Cidade", "👤 Buscar Pessoa", "🏢 Buscar por Empresa"])
+
+    with subtab0:
+        st.markdown("#### Descobrir empresas automaticamente por cidade")
+        st.info("""
+        🌎 **Como funciona**: digite a cidade (ou várias, separadas por vírgula) e,
+        se quiser, um segmento e um porte de empresa. O app busca empresas reais
+        usando a base da Apollo.io (nome, setor, cidade, funcionários estimados, site).
+        O **CNPJ não vem automaticamente** dessa fonte — fica um campo editável na
+        tabela para você colar o CNPJ quando encontrar (no Google, LinkedIn, site da
+        empresa etc.). Depois, clique em **"Enriquecer com CNPJs"** para completar
+        automaticamente: dados da Receita Federal, distância de Aguaí-SP e contatos
+        de compras — tudo reaproveitando o pipeline que já existe no app.
+        """)
+
+        cidade_texto = st.text_input(
+            "📍 Cidade (ou várias, separadas por vírgula)",
+            value="Aguaí, São Paulo, Brazil",
+            placeholder="ex: Aguaí, São Paulo, Brazil",
+            key="cidade_busca_lista",
+        )
+        cidades_selecionadas = []
+        for c in cidade_texto.split(","):
+            c = c.strip()
+            if not c:
+                continue
+            # Garante que a cidade tenha país, para a Apollo localizar corretamente
+            if "brazil" not in c.lower() and "brasil" not in c.lower():
+                c = f"{c}, Brazil"
+            cidades_selecionadas.append(c)
+
+        col_setor, col_porte = st.columns(2)
+        with col_setor:
+            setor_busca = st.text_input(
+                "🏭 Segmento/setor (opcional)", placeholder="ex: indústria alimentícia, metalurgia...", key="setor_busca"
+            )
+        with col_porte:
+            porte_busca = st.selectbox(
+                "📏 Porte da empresa", ["Qualquer porte"] + list(FAIXAS_PORTE_APOLLO.keys()), key="porte_busca"
+            )
+
+        limite_empresas = st.slider("📊 Máximo de empresas na lista", 5, 50, 50, key="limite_empresas")
+
+        if st.button("🚀 Gerar Lista de Empresas", use_container_width=True, type="primary", key="btn_gerar_lista"):
+            if cidades_selecionadas:
+                with st.spinner(f"🔎 Buscando empresas em {len(cidades_selecionadas)} cidade(s)..."):
+                    setor_kw = [setor_busca] if setor_busca else None
+                    faixas_kw = FAIXAS_PORTE_APOLLO.get(porte_busca)
+                    empresas, erros = buscar_empresas_por_regiao(
+                        cidades_selecionadas, setor_kw, limite_empresas, faixas_kw
+                    )
+
+                if empresas:
+                    st.success(f"✅ {len(empresas)} empresa(s) encontrada(s)!")
+                    st.session_state.df_lista_gerada = pd.DataFrame(empresas)
+                else:
+                    st.warning("⚠️ Nenhuma empresa encontrada para essa região/segmento. Tente outras cidades ou remova o filtro de setor.")
+
+                if erros:
+                    with st.expander(f"⚠️ Avisos durante a busca ({len(erros)})"):
+                        for e in erros:
+                            st.text(e)
+            else:
+                st.error("❌ Informe ao menos uma cidade.")
+
+        if 'df_lista_gerada' in st.session_state and not st.session_state.df_lista_gerada.empty:
+            st.divider()
+            st.markdown("##### ✏️ Preencha o CNPJ das empresas que quiser enriquecer")
+            df_editado = st.data_editor(
+                st.session_state.df_lista_gerada,
+                column_config={
+                    "Site": st.column_config.LinkColumn("Site"),
+                    "LinkedIn": st.column_config.LinkColumn("LinkedIn"),
+                    "CNPJ": st.column_config.TextColumn("CNPJ (cole aqui)", help="14 dígitos, com ou sem pontuação"),
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="dynamic",
+                key="editor_lista_gerada",
+            )
+            st.session_state.df_lista_gerada = df_editado
+
+            col_enr, col_dl = st.columns(2)
+            with col_enr:
+                if st.button("✨ Enriquecer com CNPJs", use_container_width=True, key="btn_enriquecer_lista"):
+                    with st.spinner("🔎 Enriquecendo empresas com CNPJ preenchido..."):
+                        st.session_state.df_lista_enriquecida = enriquecer_lista_gerada(df_editado)
+                    st.success("✅ Enriquecimento concluído! Veja a tabela abaixo.")
+            with col_dl:
+                st.download_button(
+                    "📥 Baixar Lista (como está)",
+                    data=df_editado.to_csv(index=False).encode('utf-8-sig'),
+                    file_name="lista_gerada_empresas.csv",
+                    use_container_width=True,
+                )
+
+        if 'df_lista_enriquecida' in st.session_state and not st.session_state.df_lista_enriquecida.empty:
+            st.divider()
+            st.markdown("##### ✅ Lista Enriquecida")
+            st.dataframe(st.session_state.df_lista_enriquecida, hide_index=True, use_container_width=True)
+            st.download_button(
+                "📥 Baixar Lista Enriquecida",
+                data=st.session_state.df_lista_enriquecida.to_csv(index=False).encode('utf-8-sig'),
+                file_name="lista_enriquecida_empresas.csv",
+                use_container_width=True,
+                key="download_lista_enriquecida",
+            )
+
     with subtab1:
         st.markdown("#### Buscar dados de um profissional")
         col1, col2 = st.columns(2)
