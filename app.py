@@ -8,6 +8,8 @@ import math
 # 1. Configuração da Página
 st.set_page_config(page_title="BDR Hunter Pro | Gelson96", layout="wide", page_icon="🚀")
 
+URL_LOGO = "https://static.wixstatic.com/media/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png/v1/fill/w_232,h_67,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/82a786_45084cbd16f7470993ad3768af4e8ef4~mv2.png"
+
 # --- CONFIGURAÇÃO DE APIs ---
 HUNTER_API_KEY = "ade32d411c5065d4f61d89a27b4b80018b62647a"
 APOLLO_API_KEY = "cSG2GJRmKBGpdGpNykMJuA"
